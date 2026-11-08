@@ -1,120 +1,63 @@
 # IELTS Academy
 
-A polished, frontend-only IELTS preparation demo built with Next.js App Router, React, TypeScript, Tailwind CSS, Radix/shadcn-style UI primitives, Lucide, Motion, Recharts, React Hook Form, Zod, and Zustand.
+A database-backed IELTS learning platform using Next.js 16, React, TypeScript, Supabase PostgreSQL/Auth/Storage, and optional OpenAI feedback. The original Academy typography, colors and dark mode are retained. The active application no longer uses demo sessions, bundled sample questions, or fabricated dashboard metrics.
 
-## Run locally
+## Development
 
-Node.js **22 or newer** is required (validated on Node 24.19.0 / npm 11.9.0).
+Use Node 22+ (verified with Node 24). Work in this existing isolated checkout; do not create an additional worktree unless explicitly requested.
 
-```bash
-cd ielts-academy
-npm install
+```sh
+npm ci
+cp .env.example .env.local
+# Set Supabase project URL, anon/publishable key and server service-role key securely.
 npm run dev
 ```
 
-Open port 3000 in your local browser. No secrets, environment variables, database, or API server are needed. For a reproducible dependency installation, use `npm ci` with the included lockfile. Webpack is explicitly selected because Turbopack's compiler subprocess failed under the managed environment's process restrictions.
+Use `npm ci --cache /workspace/.npm-cache` if the cloud user's home directory is read-only. Never disable TLS or integrity verification. Configure `APP_URL` to the exact origin used in your browser, including port; state-changing requests enforce same-origin protection. Sessions use HttpOnly, SameSite=Lax cookies, Secure in production. Browser code receives no service or AI key. Session refresh is handled on authenticated API requests.
 
-```bash
+The app renders a configuration-required state when Supabase is absent. It does not substitute fake accounts or content. Authenticated students complete `/onboarding` before the dashboard. Admins and teachers are redirected by database roles, not a role chooser.
+
+See [deployment and security](docs/DEPLOYMENT.md), [architecture](docs/ARCHITECTURE.md), and [API workflows](docs/API.md).
+
+## Local Supabase
+
+Install the official Supabase CLI and Docker. Configuration is in `supabase/config.toml`; ports 54331–54334 keep it separate from the disposable PostgreSQL test database. No educational seed runs.
+
+```sh
+supabase start -x realtime,imgproxy,postgres-meta,studio,edge-runtime,logflare,vector,supavisor
+# If required, the CLI officially supports SUPABASE_INTERNAL_IMAGE_REGISTRY=docker.io.
+# Copy local URL/anon/service values securely into .env.local (do not paste them into chat).
+npm run dev
+```
+
+Local Auth configuration permits development signups; production must enable email confirmation, SMTP, CAPTCHA and appropriate rate limits. Never point test suites at production.
+
+## Validation
+
+```sh
+npm run typecheck
 npm run lint
-npx tsc --noEmit
 npm test
 npm run build
-npm start
+npm run test:e2e
 ```
 
-## Explore the demo
+The PostgreSQL integration suite uses a **disposable `academy_test` database** in the local container `ielts-db`. It bootstraps Auth/Storage schema interfaces, applies every migration, and exercises genuine SQL/RLS/RPC behavior; it does not emulate a live hosted Auth service.
 
-The public home page introduces the product and links to the interactive workspace. Go to **Log in** and choose **student**, **teacher**, or **admin** for a ready-made demo. Alternatively, use example details in the login or registration form. Passwords are only validated for the UI: they are never stored or transmitted. Recovery and reset pages are previews and do not send email or change credentials.
-
-| Route | Experience |
-| --- | --- |
-| `/` | Marketing site, interactive dashboard link, skills, features, courses, pricing previews, FAQ |
-| `/login`, `/register` | Validated forms and local role switching |
-| `/forgot-password`, `/reset-password` | Explicitly labeled recovery/reset previews |
-| `/dashboard` | Personal greeting, illustrative band scores, local goals/history, charts, recommended practice, assignments, recent teacher-demo feedback |
-| `/practice/listening` | Four sections, original 31-second synthetic audio, playback/seek/volume, seven questions across six question types, timer, autosave, deterministic results/review |
-| `/practice/reading` | Original passage, Academic/General tabs, seven question types, split workspace, highlighting, notes, timer, autosave, answer explanations |
-| `/practice/writing` | Academic Task 1 chart, General Training letter, Task 2 essay; formatted editor, word count, focus mode, timer, draft recovery/history, saved submissions |
-| `/practice/speaking` | Parts 1–3, cue card/preparation timer, microphone permission/error handling, five-minute recording limit, playback/download, IndexedDB recording history |
-| `/mock-exams` | Academic/General guided sample sequence across all four skills, saved responses, completion guards, confirmation, objective results |
-| `/courses` | Catalog, category/enrollment filters, course details, 25 text lessons across four courses, understanding checks, persisted enrollment/completion |
-| `/progress` | Local practice history and details, course completion, illustrative band/weekly activity and skill breakdown charts |
-| `/teacher` | Student/class/assignment/course CRUD, essay review/feedback, local recording playback/feedback, progress previews |
-| `/admin` | User/teacher/course/test/question/content CRUD, search, pagination, analytics preview, settings link |
-| `/settings` | Display name, persisted light/dark mode, English/Uzbek/Russian navigation, target band, daily intention, JSON progress export |
-
-## Important demo boundaries
-
-- This is an independent educational demonstration, not an official IELTS product, accredited exam, or score prediction.
-- **There is no backend, database, production authentication, payment processing, email delivery, or paid AI/speech API.** Role gates are a user-experience feature, not security. Every demo role shares this browser's data.
-- Writing and Speaking submissions show **Awaiting evaluation**. Fixed, explicitly opted-in demo feedback does not analyse user content. No overall mock band is calculated without evaluated subjective scores.
-- Objective practice contains **seven original questions per skill**, not a full 40-question test. Band estimates use an illustrative percentage mapping documented in `src/lib/grading.ts`; they are not official conversions.
-- Academic and General Training share the original objective sample. The mock exam is a shortened sequence with one selected writing task and one saved speaking response, not a full-length exam. Course video placeholders are explicitly unavailable; text lessons and quizzes work.
-- Skill/weekly trend charts and prefilled dashboard band scores are clearly labeled **sample data**. Actual completed practice and course progress are separate. Marking daily intentions is a self-reported checklist, not an activity measurement.
-- Teacher/admin CRUD edits persist local workspace records. They do not publish new live courses or tests to the learner catalog. The catalog and practice library are bundled source content.
-- Navigation, dashboard headings, and core preferences support English, Uzbek, and Russian. Detailed interface copy, practice material, and lessons are in English; this is not exhaustive localization.
-- Session metadata, answers, drafts, timers, goals, feedback, and results are in `localStorage` (`ielts-academy-v1`). Recordings are in IndexedDB (`ielts-academy-recordings`). No cross-device syncing occurs. Clearing browser data deletes this local state. Export JSON in Settings and download audio separately to keep a copy.
-- Microphone recording requires a supported browser, explicit permission, and HTTPS or localhost. Recording was tested in Chromium with a synthetic browser microphone. Real hardware and Safari/Firefox have not been verified here.
-- Browser highlighting uses pointer text selection; mobile users can save notes instead. The formatting toolbar uses `document.execCommand` as a simple browser-native demo editor; a production integration should use a maintained editor package.
-
-## Architecture and integration points
-
-```text
-src/
-  app/                 App Router pages, metadata, errors, icon, route validation
-  components/
-    ui/                Button variants, input, card, badge, progress, modal/dialog,
-                       tooltip, tabs, pagination, empty/error/loading states, toast
-    layout/            Sidebar, topbar, breadcrumbs, language menu, search, inbox
-    charts/            Responsive Recharts visualizations
-    listening/         Audio playback controls
-    speaking/          Teacher recording review
-  features/            Landing, auth, dashboard, practice, writing, speaking,
-                       mock exams, courses, progress, role workspaces, settings
-  data/                Original content, sample records, interface translations
-  hooks/               Hydration readiness
-  lib/                 Pure grading/word count, IndexedDB adapter, class utilities
-  store/               Typed Zustand state, versioned local persistence
-  types/               Role, skill, question, attempt, record contracts
-  styles/              Shared tokens, visual system, dark mode, responsive layouts
-public/audio/          Original synthetic listening sample and attribution
-public/images/         Original brand asset
-scripts/               Reproducible audio generation and source packaging
-tests/                Unit, functional, responsive, and accessibility checks
+```sh
+docker run -d --name ielts-db -e POSTGRES_HOST_AUTH_METHOD=trust \
+  -p 127.0.0.1:54322:5432 postgres:17-alpine
+npm run test:db
 ```
 
-Replace the local state actions with authenticated service/repository adapters for future backend work. Keep deterministic grading server authoritative in production. Implement secure server sessions, role authorization, storage policies, evaluation services, and consent handling before using real user data. Never put secret API keys in client bundles.
+This trust-only database is local test infrastructure, never a deployment configuration. Existing container contents are retained; the suite drops/recreates only `academy_test`. Browser tests use isolated API fixtures for authenticated UI workflows; their results do not establish hosted Supabase or OpenAI connectivity. The unit suite retains separately labeled legacy grading tests as regression checks for the unused original demo code.
 
-Typography is self-hosted from Fontsource (DM Sans and Instrument Serif), with no runtime Google Fonts request. Illustrations are original CSS/SVG compositions. UI primitives follow shadcn conventions using Radix, class-variance-authority, `cn`, and the included `components.json`.
+## Application workflows
 
-## Browser tests
+- Admin: create draft courses, modules, lessons, tests, sections, passages, questions, options, private keys, Writing/Speaking tasks and mock exams; preview, edit, publish, unpublish, archive or delete where referential integrity allows. Manage roles and teacher/student relationships. Upload private media, view real counts, audit events and AI limits.
+- Student: register/verify, resume onboarding, enroll, complete published lessons, take timed objective practice with server marking, submit timed writing, record/upload speaking, complete sequential mock sections, review real results and consent to optional AI processing.
+- Teacher: access only assigned students, assign published content, review authorized writing/audio, and evaluate using separate writing/speaking rubrics. Teacher review supersedes AI estimates.
 
-```bash
-# If a compatible Chromium is installed, point to it:
-PLAYWRIGHT_CHROMIUM_EXECUTABLE=/usr/bin/chromium npm run test:e2e
+Content is administrator-authored; interface language does not machine-translate examination text. The three interface dictionaries use stable keys. Only the onboarding badge is awarded automatically. XP and streak widgets are deliberately hidden; no learning activity is invented.
 
-# On a machine without Chromium:
-npx playwright install chromium
-# Set PLAYWRIGHT_CHROMIUM_EXECUTABLE to that installed browser's executable,
-# or remove executablePath in playwright.config.ts to use Playwright's default.
-```
-
-The suite starts the dev server automatically if port 3000 is available and reuses an existing one outside CI. Tests cover landing, forms, role sessions, answer persistence/grading, original audio playback, writing recovery, recording and denied permission, course completion, teacher/admin CRUD, theme/language/goals, mock sequencing, and page overflow/mobile navigation at **320, 375, 430, 768, 1024, 1440, and 1920 px**. Eight representative pages and the dark dashboard are scanned with axe for WCAG A/AA rules (decorative elements explicitly marked `aria-hidden` are excluded). Automated checks do not constitute a full accessibility certification or cross-browser audit.
-
-## Rebuild the listening sample
-
-The checked-in WAV needs no runtime synthesis. If FFmpeg includes its `flite` source filter:
-
-```bash
-node scripts/generate-audio.mjs
-```
-
-The script uses only the original `listeningScript` text. No copyrighted exam recording or network speech service is used.
-
-## Package the source
-
-```bash
-python3 scripts/package.py
-```
-
-This creates `../ielts-academy-frontend.zip` with an `ielts-academy/` root, source/config/lockfile, tests, fonts' package declarations, and public assets. It excludes `node_modules`, `.next`, Git metadata, secrets, test output, and temporary files. Installation requires access to the npm registry.
+Legacy frontend-only feature files and `src/data/content.ts` are retained for reference and are not imported by the active platform. Do not reconnect them as production data sources.

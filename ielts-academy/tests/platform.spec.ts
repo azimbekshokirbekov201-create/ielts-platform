@@ -1,394 +1,455 @@
-import { test, expect, type Page } from "@playwright/test";
-async function demo(page: Page, role = "Student") {
-  await page.goto("/login");
-  await page
-    .getByRole("button", { name: role.toLowerCase(), exact: true })
-    .click();
-  await expect(page).toHaveURL(
-    role === "Student" ? /dashboard/ : new RegExp(role.toLowerCase()),
-  );
-}
-test("landing navigation, FAQ, free plan and plan preview work", async ({
-  page,
-}) => {
+import { test, expect } from "@playwright/test";
+test("public landing, languages and secure account form", async ({ page }) => {
   await page.goto("/");
   await expect(
-    page.getByRole("heading", { name: /Your ambition/ }),
+    page.getByRole("heading", { name: "Welcome to IELTS Academy!" }),
   ).toBeVisible();
-  await page
-    .getByText("Is this an official IELTS platform?", { exact: true })
-    .click();
-  await expect(page.getByText(/not affiliated with or endorsed/)).toBeVisible();
-  await page.getByRole("button", { name: "View plan preview" }).click();
-  await expect(page.getByRole("dialog")).toContainText("no checkout");
-  await page.keyboard.press("Escape");
-  await page
-    .getByRole("link", { name: "Explore the demo", exact: true })
-    .first()
-    .click();
-  await expect(page).toHaveURL(/dashboard/);
-});
-test("login form validates, local session persists and no password is stored", async ({
-  page,
-}) => {
+  await page.getByRole("combobox", { name: "Language" }).selectOption("uz");
+  await expect(
+    page.getByRole("heading", { name: "IELTS Academy’ga xush kelibsiz!" }),
+  ).toBeVisible();
+  await page.getByRole("combobox", { name: "Til" }).selectOption("ru");
+  await expect(
+    page.getByRole("heading", { name: "Добро пожаловать в IELTS Academy!" }),
+  ).toBeVisible();
   await page.goto("/login");
-  await page.getByRole("button", { name: "Enter demo workspace" }).click();
+  await expect(page.getByRole("heading", { name: "Log in" })).toBeVisible();
+  await expect(page.getByLabel(/Password/)).toHaveAttribute("minlength", "12");
+  await expect(page.getByText("Demo role")).toHaveCount(0);
   await expect(
-    page.getByText("Enter a valid email address.", { exact: true }),
-  ).toBeVisible();
-  await expect(
-    page.getByText("Use at least 8 characters.", { exact: true }),
-  ).toBeVisible();
-  await page.getByLabel("Email address").fill("learner@example.com");
-  await page
-    .getByLabel("Password (UI only — not stored)", { exact: true })
-    .fill("demo-pass-123");
-  await page.getByRole("button", { name: "Enter demo workspace" }).click();
-  await expect(page).toHaveURL(/dashboard/);
-  await page.reload();
-  await expect(
-    page.getByRole("heading", { name: /Good morning, learner/ }),
-  ).toBeVisible();
-  expect(
-    await page.evaluate(() => localStorage.getItem("ielts-academy-v1")),
-  ).not.toContain("demo-pass-123");
+    page.getByRole("button", { name: /student|teacher|admin/i }),
+  ).toHaveCount(0);
 });
-test("registration and recovery flows are explicitly demo-only", async ({
+test("rejects cross-origin mutations before processing credentials", async ({
+  request,
+}) => {
+  const r = await request.post("/api/auth/login", {
+    headers: { origin: "https://attacker.example" },
+    data: { email: "a@example.test", password: "irrelevant-password" },
+  });
+  expect(r.status()).toBe(403);
+  expect((await r.json()).error).toBe("forbidden");
+});
+test("anonymous API never returns private data", async ({ request }) => {
+  const r = await request.get("/api/submissions");
+  expect([401, 503]).toContain(r.status());
+  expect(await r.json()).not.toHaveProperty("data");
+});
+const me = {
+  id: "10000000-0000-4000-8000-000000000001",
+  email: "test@example.test",
+  profile: { display_name: "Test learner" },
+  preferences: { language: "en", theme: "light", ai_consent: false },
+  roles: ["STUDENT"],
+  onboarding: null as Record<string, unknown> | null,
+  destination: "/onboarding",
+};
+test("onboarding saves every step, resumes and summarizes genuine answers", async ({
   page,
 }) => {
-  await page.goto("/register");
-  await page.getByLabel("Full name").fill("Taylor Demo");
-  await page.getByLabel("Email address").fill("taylor@example.com");
-  await page
-    .getByLabel("Password (UI only — not stored)", { exact: true })
-    .fill("sample123");
-  await page.getByRole("button", { name: "Create local demo session" }).click();
-  await expect(page).toHaveURL(/dashboard/);
-  await page.goto("/forgot-password");
-  await page.getByLabel("Email address").fill("taylor@example.com");
-  await page.getByRole("button", { name: "Preview recovery" }).click();
-  await expect(page.getByRole("status")).toContainText(
-    "No recovery email was sent",
-  );
-  await page.getByRole("link", { name: "Preview reset screen" }).click();
-  await page.getByLabel("New password").fill("replacement123");
-  await page.getByRole("button", { name: "Preview password reset" }).click();
-  await expect(page.getByRole("status")).toContainText(
-    "No password was changed",
-  );
-});
-test("dashboard goals, search and navigation work", async ({ page }) => {
-  await demo(page);
-  await page.getByLabel("Read something new").check();
-  await page.reload();
-  await expect(page.getByLabel("Read something new")).toBeChecked();
-  await page.getByRole("button", { name: "Search platform" }).click();
-  await page.getByRole("textbox", { name: "Search pages" }).fill("writing");
-  await page
-    .getByRole("dialog")
-    .getByRole("link", { name: "Writing", exact: true })
-    .click();
-  await expect(page).toHaveURL(/practice\/writing/);
-});
-test("reading answers autosave and grade deterministically with explanations", async ({
-  page,
-}) => {
-  await page.goto("/practice/reading");
-  await page.getByRole("button", { name: "Begin practice" }).click();
-  await page.getByLabel("False", { exact: true }).check();
-  await page.getByLabel("Yes", { exact: true }).check();
-  await page.getByLabel("To learn practical skills", { exact: true }).check();
-  await page.reload();
-  await page.getByRole("button", { name: "Resume practice" }).click();
-  await expect(page.getByLabel("False", { exact: true })).toBeChecked();
-  await page.getByRole("button", { name: "Section 2", exact: true }).click();
-  await page.getByLabel("Learning by growing", { exact: true }).check();
-  await page.getByLabel("3", { exact: true }).check();
-  await page.getByRole("button", { name: "Section 3", exact: true }).click();
-  await page.locator("#r6").fill("Saturday");
-  await page.locator("#r7").fill("rainwater");
-  await page.getByRole("button", { name: "Submit answers" }).click();
-  await page.getByRole("button", { name: "Confirm submission" }).click();
-  await expect(page.getByText("7 of 7 correct")).toBeVisible();
-  await expect(
-    page.getByText(
-      "The council provided land, while residents paid for tools.",
-    ),
-  ).toBeVisible();
-  await page.goto("/progress");
-  await expect(page.getByText("7/7 correct")).toBeVisible();
-});
-test("listening audio plays, seeks and pauses; all four sections submit", async ({
-  page,
-}) => {
-  await page.goto("/practice/listening");
-  await page.getByRole("button", { name: "Begin practice" }).click();
-  await page.getByRole("button", { name: "Play audio", exact: true }).click();
-  await expect(page.getByRole("button", { name: "Pause audio" })).toBeVisible();
-  await expect
-    .poll(() =>
-      page.locator("audio").evaluate((a: HTMLAudioElement) => a.currentTime),
-    )
-    .toBeGreaterThan(0);
-  await page.getByRole("button", { name: "Pause audio" }).click();
-  await page.locator("#l1").fill("9");
-  await page.locator("#l2").fill("20");
-  await page.getByRole("button", { name: "Section 2", exact: true }).click();
-  await page.getByLabel("Library", { exact: true }).check();
-  await page.getByLabel("East", { exact: true }).check();
-  await page.getByRole("button", { name: "Section 3", exact: true }).click();
-  await page.getByLabel("Interviews", { exact: true }).check();
-  await page.getByRole("button", { name: "Section 4", exact: true }).click();
-  await page.locator("#l6").fill("Saturday");
-  await page.locator("#l7").fill("food");
-  await page.getByRole("button", { name: "Submit answers" }).click();
-  await page.getByRole("button", { name: "Confirm submission" }).click();
-  await expect(page.getByText("7 of 7 correct")).toBeVisible();
-});
-test("writing draft survives reload, timer runs and submission awaits evaluation", async ({
-  page,
-}) => {
-  await page.goto("/practice/writing");
-  const editor = page.getByRole("textbox", { name: "Your writing response" });
-  await editor.fill(
-    "Cities provide opportunities for work and education. However, rural areas offer a strong sense of community.",
-  );
-  await expect(page.getByText("16 / 250 words")).toBeVisible();
-  await page.getByRole("button", { name: "Start timer" }).click();
-  await expect(page.getByLabel("Time remaining")).toBeVisible();
-  await page.reload();
-  await expect(editor).toContainText("Cities provide opportunities");
-  await page.getByRole("button", { name: "Submit writing" }).click();
-  await page.getByRole("button", { name: "Save submission" }).click();
-  await expect(
-    page.getByRole("heading", { name: "Awaiting evaluation", exact: true }),
-  ).toBeVisible();
-  await page
-    .getByRole("button", { name: "Explore explicitly labeled demo feedback" })
-    .click();
-  await expect(
-    page.getByText("DEMO FEEDBACK · FIXED EXAMPLE", { exact: true }),
-  ).toBeVisible();
-});
-test("speaking records original browser audio, replays and persists history", async ({
-  page,
-  context,
-}) => {
-  await context.grantPermissions(["microphone"]);
-  await page.goto("/practice/speaking");
-  await page
-    .getByRole("button", { name: "Start recording", exact: true })
-    .click();
-  await expect(
-    page.getByRole("button", { name: "Stop recording" }),
-  ).toBeVisible();
-  await page.waitForTimeout(1200);
-  await page.getByRole("button", { name: "Stop recording" }).click();
-  await expect(
-    page.getByRole("link", { name: "Download recording" }),
-  ).toBeVisible();
-  await page.getByRole("button", { name: "Save practice session" }).click();
-  await expect(
-    page.getByRole("button", { name: "Saved · Awaiting evaluation" }),
-  ).toBeDisabled();
-  await page.reload();
-  await expect(
-    page.getByRole("button", { name: "Replay", exact: true }),
-  ).toHaveCount(1);
-  await page.getByRole("button", { name: "Replay", exact: true }).click();
-  await expect(page.locator("audio")).toBeVisible();
-});
-test("speaking microphone denial is explained", async ({ page, context }) => {
-  await context.grantPermissions([]);
-  await page.addInitScript(() => {
-    navigator.mediaDevices.getUserMedia = async () => {
-      throw new DOMException("Permission denied", "NotAllowedError");
+  const current = structuredClone(me);
+  const saves: Record<string, unknown>[] = [];
+  await page.route("**/api/me", (r) => r.fulfill({ json: { data: current } }));
+  await page.route("**/api/onboarding", async (r) => {
+    const p = r.request().postDataJSON();
+    saves.push(p);
+    current.onboarding = {
+      ...current.onboarding,
+      ...p.answers,
+      completed: p.finish,
     };
+    if (p.finish) current.destination = "/dashboard";
+    await r.fulfill({ json: { data: current.onboarding } });
+  });
+  await page.goto("/onboarding");
+  await page.getByRole("button", { name: "Start", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Career opportunities", exact: true })
+    .click();
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
+  await page.reload();
+  await expect(
+    page.getByRole("heading", { name: "What’s your dream IELTS score?" }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "7.5", exact: true }).click();
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
+  await page.getByRole("button", { name: "Intermediate", exact: true }).click();
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
+  await page.getByRole("button", { name: "Reading", exact: true }).click();
+  await page.getByRole("button", { name: "Speaking", exact: true }).click();
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
+  await page.getByRole("button", { name: "30", exact: true }).click();
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
+  await page.getByRole("button", { name: "Monday", exact: true }).click();
+  await page.getByRole("button", { name: "Friday", exact: true }).click();
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "Your learning profile" }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("Career opportunities", { exact: false }).last(),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
+  await page.getByRole("button", { name: "Finish", exact: true }).click();
+  await expect(page.getByRole("progressbar")).toHaveAttribute(
+    "aria-valuenow",
+    "100",
+  );
+  expect(saves).toHaveLength(9);
+  expect(current.onboarding?.priority_skills).toEqual(["reading", "speaking"]);
+  expect(current.onboarding?.completed).toBe(true);
+});
+test("published catalog displays an empty state without fake content", async ({
+  page,
+}) => {
+  await page.route("**/api/me", (r) =>
+    r.fulfill({
+      json: {
+        data: {
+          ...me,
+          destination: "/dashboard",
+          onboarding: { completed: true },
+        },
+      },
+    }),
+  );
+  await page.route("**/api/catalog/tests*", (r) =>
+    r.fulfill({ json: { data: [] } }),
+  );
+  await page.goto("/practice/reading");
+  await expect(page.getByText(/Nothing here yet/)).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Start", exact: true }),
+  ).toHaveCount(0);
+});
+test("errors and pending requests have visible states", async ({ page }) => {
+  await page.route("**/api/me", (r) =>
+    r.fulfill({
+      json: {
+        data: {
+          ...me,
+          destination: "/dashboard",
+          onboarding: { completed: true },
+        },
+      },
+    }),
+  );
+  await page.route("**/api/catalog/courses", async (r) => {
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    await r.fulfill({ status: 500, json: { error: "server_error" } });
+  });
+  await page.goto("/courses");
+  await expect(page.getByRole("status")).toContainText("Loading");
+  await expect(
+    page.getByRole("alert").filter({ hasText: "could not complete" }),
+  ).toBeVisible();
+});
+for (const width of [320, 375, 768, 1440])
+  test(`public layout fits ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto("/");
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+    ).toBe(true);
+  });
+test("admin creates drafts and explicitly publishes/unpublishes through APIs", async ({
+  page,
+}) => {
+  const rows: Record<string, unknown>[] = [];
+  await page.route("**/api/me", (r) =>
+    r.fulfill({
+      json: {
+        data: { ...me, roles: ["STUDENT", "ADMIN"], destination: "/admin" },
+      },
+    }),
+  );
+  await page.route("**/api/admin/stats", (r) =>
+    r.fulfill({
+      json: { data: { users: 1, published_tests: 0, completed_attempts: 0 } },
+    }),
+  );
+  await page.route("**/api/admin/content/courses**", async (r) => {
+    const request = r.request();
+    if (request.method() === "POST")
+      rows.push({
+        id: "20000000-0000-4000-8000-000000000001",
+        ...request.postDataJSON(),
+      });
+    if (request.method() === "PATCH")
+      Object.assign(rows[0], request.postDataJSON());
+    await r.fulfill({
+      json: { data: request.method() === "GET" ? rows : rows[0] },
+    });
+  });
+  await page.goto("/admin");
+  await page
+    .getByLabel("Title", { exact: true })
+    .fill("Isolated course fixture");
+  await page
+    .getByLabel("Description", { exact: true })
+    .fill("Only a browser test fixture.");
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "Isolated course fixture" }),
+  ).toBeVisible();
+  expect(rows[0].status).toBe("draft");
+  await page.getByRole("button", { name: "Publish", exact: true }).click();
+  await expect(
+    page.getByRole("button", { name: "Unpublish", exact: true }),
+  ).toBeVisible();
+  expect(rows[0].status).toBe("published");
+  await page.getByRole("button", { name: "Unpublish", exact: true }).click();
+  await expect(
+    page.getByRole("button", { name: "Publish", exact: true }),
+  ).toBeVisible();
+  expect(rows[0].status).toBe("draft");
+});
+test("objective exam autosaves answers without client scores", async ({
+  page,
+}) => {
+  const testId = "20000000-0000-4000-8000-000000000001",
+    attemptId = "20000000-0000-4000-8000-000000000002",
+    questionId = "20000000-0000-4000-8000-000000000003";
+  const writes: Record<string, unknown>[] = [];
+  const attempt = {
+    id: attemptId,
+    status: "in_progress",
+    deadline: new Date(Date.now() + 600000).toISOString(),
+    student_answers: [],
+  };
+  await page.route("**/api/me", (r) =>
+    r.fulfill({
+      json: {
+        data: {
+          ...me,
+          destination: "/dashboard",
+          onboarding: { completed: true },
+        },
+      },
+    }),
+  );
+  await page.route("**/api/catalog/tests*", (r) =>
+    r.fulfill({
+      json: {
+        data: [
+          { id: testId, title: "Isolated exam fixture", variant: "academic" },
+        ],
+      },
+    }),
+  );
+  await page.route("**/api/test/*", (r) =>
+    r.fulfill({
+      json: {
+        data: {
+          id: testId,
+          title: "Isolated exam fixture",
+          test_sections: [
+            {
+              id: "section",
+              title: "Section",
+              position: 0,
+              passages: [],
+              questions: [
+                {
+                  id: questionId,
+                  prompt: "Your response",
+                  kind: "text",
+                  position: 0,
+                  question_options: [],
+                },
+              ],
+            },
+          ],
+        },
+      },
+    }),
+  );
+  await page.route("**/api/attempts**", async (r) => {
+    const req = r.request();
+    if (req.method() === "PATCH") {
+      writes.push(req.postDataJSON());
+      await r.fulfill({ json: { data: null } });
+    } else if (req.url().endsWith("/submit"))
+      await r.fulfill({
+        json: {
+          data: {
+            ...attempt,
+            status: "submitted",
+            raw_score: 1,
+            total_points: 1,
+            band: null,
+          },
+        },
+      });
+    else await r.fulfill({ json: { data: attempt } });
+  });
+  await page.goto("/practice/reading");
+  await page.getByRole("button", { name: "Start", exact: true }).click();
+  await page
+    .getByRole("textbox", { name: "Your answer 1" })
+    .fill("Student answer");
+  await expect(page.getByRole("status")).toContainText("Saved");
+  expect(writes.at(-1)).toEqual({
+    answers: { [questionId]: "Student answer" },
+  });
+  await page.getByRole("button", { name: "Submit", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "Raw score: 1/1" }),
+  ).toBeVisible();
+});
+test("writing autosaves, resumes and submits a stable draft identity", async ({
+  page,
+}) => {
+  const taskId = "60000000-0000-4000-8000-000000000001",
+    draftId = "60000000-0000-4000-8000-000000000002";
+  const task = {
+    id: taskId,
+    title: "Writing fixture",
+    prompt: "Isolated writing test instructions",
+    task_number: 2,
+  };
+  let saved = "";
+  let submitted = false;
+  await page.route("**/api/me", (r) =>
+    r.fulfill({
+      json: {
+        data: {
+          ...me,
+          destination: "/dashboard",
+          onboarding: { completed: true },
+        },
+      },
+    }),
+  );
+  await page.route("**/api/catalog/writing_tasks*", (r) =>
+    r.fulfill({ json: { data: [task] } }),
+  );
+  await page.route("**/api/writing", async (r) => {
+    const p = r.request().postDataJSON();
+    if (p.body !== undefined) {
+      expect(p.submission_id).toBe(draftId);
+      saved = p.body;
+    }
+    if (p.finish) submitted = true;
+    await r.fulfill({
+      json: {
+        data: {
+          id: draftId,
+          task_id: taskId,
+          body: saved,
+          deadline: new Date(Date.now() + 600000).toISOString(),
+          submitted_at: submitted ? new Date().toISOString() : null,
+        },
+      },
+    });
+  });
+  await page.goto("/practice/writing");
+  await page.getByRole("button", { name: "Start", exact: true }).click();
+  await page
+    .getByRole("textbox", { name: "Your answer" })
+    .fill("My actual response in this isolated browser test.");
+  await expect(page.getByRole("status")).toContainText("Saved");
+  expect(saved).toContain("My actual response");
+  await page.reload();
+  await page.getByRole("button", { name: "Start", exact: true }).click();
+  await expect(page.getByRole("textbox", { name: "Your answer" })).toHaveValue(
+    saved,
+  );
+  await page.getByRole("button", { name: "Submit", exact: true }).click();
+  await expect(
+    page.getByRole("link", { name: /Awaiting evaluation/ }),
+  ).toBeVisible();
+  expect(submitted).toBe(true);
+});
+test("speaking records real browser audio and uses the signed-upload workflow", async ({
+  page,
+}) => {
+  const taskId = "70000000-0000-4000-8000-000000000001";
+  let uploaded = false,
+    attached = false;
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  await page.context().grantPermissions(["microphone"]);
+  await page.route("**/api/me", (r) =>
+    r.fulfill({
+      json: {
+        data: {
+          ...me,
+          destination: "/dashboard",
+          onboarding: { completed: true },
+        },
+      },
+    }),
+  );
+  await page.route("**/api/catalog/speaking_tasks*", (r) =>
+    r.fulfill({
+      json: {
+        data: [
+          {
+            id: taskId,
+            title: "Speaking fixture",
+            prompt: "Respond to an isolated test prompt.",
+            part: 1,
+            preparation_seconds: 0,
+            response_seconds: 10,
+          },
+        ],
+      },
+    }),
+  );
+  await page.route("**/api/media-upload", (r) =>
+    r.fulfill({
+      json: {
+        data: {
+          signedUrl: "http://127.0.0.1:3000/fixture-audio-upload",
+          path: "qa/recording.webm",
+        },
+      },
+    }),
+  );
+  await page.route("**/fixture-audio-upload", async (r) => {
+    expect(r.request().method()).toBe("PUT");
+    const audio = r.request().postDataBuffer();
+    expect(audio?.length).toBeGreaterThan(100);
+    expect(audio?.subarray(0, 4)).toEqual(Buffer.from([26, 69, 223, 163]));
+    uploaded = true;
+    await r.fulfill({ json: { Key: "qa/recording.webm" } });
+  });
+  await page.route("**/api/media-finalize", (r) =>
+    r.fulfill({ json: { data: { path: "qa/recording.webm" } } }),
+  );
+  await page.route("**/api/speaking", async (r) => {
+    expect(r.request().postDataJSON()).toEqual({
+      task_id: taskId,
+      path: "qa/recording.webm",
+    });
+    attached = true;
+    await r.fulfill({ json: { data: { id: "recording-fixture" } } });
   });
   await page.goto("/practice/speaking");
+  await page.getByRole("button", { name: "Start", exact: true }).click();
   await page
-    .getByRole("button", { name: "Start recording", exact: true })
+    .getByRole("button", { name: "Record response", exact: true })
     .click();
   await expect(
-    page
-      .getByRole("alert")
-      .filter({ hasText: "Microphone permission was denied" }),
+    page.getByRole("button", { name: "Stop recording", exact: true }),
   ).toBeVisible();
+  await page.waitForTimeout(600);
+  await page
+    .getByRole("button", { name: "Stop recording", exact: true })
+    .click();
+  await expect(page.locator("audio")).toBeVisible();
+  await page.getByRole("button", { name: "Submit", exact: true }).click();
+  await expect(
+    page.getByRole("status").filter({ hasText: "Saved" }),
+  ).toBeVisible();
+  expect(uploaded).toBe(true);
+  expect(attached).toBe(true);
+  await page.getByRole("link", { name: "Results", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "Results", exact: true }),
+  ).toBeVisible();
+  expect(errors).toEqual([]);
 });
-test("course enrollment, lesson quiz and completion persist", async ({
-  page,
-}) => {
-  await page.goto("/courses");
-  await page
-    .getByRole("button", { name: "Explore course", exact: true })
-    .first()
-    .click();
-  await page.getByRole("button", { name: "Enroll in demo course" }).click();
-  await page
-    .getByLabel("Identify the task, instructions, and word limit", {
-      exact: true,
-    })
-    .check();
-  await page.getByRole("button", { name: "Check understanding" }).click();
-  await page.getByRole("button", { name: "Complete & continue" }).click();
-  await expect(page.getByText("1 of 8 lessons complete")).toBeVisible();
-  await page.reload();
-  await page.getByRole("button", { name: "Continue course" }).first().click();
-  await expect(page.getByText("1 of 8 lessons complete")).toBeVisible();
-});
-test("teacher assignment CRUD and essay feedback are persistent", async ({
-  page,
-}) => {
-  await demo(page, "Teacher");
-  await page.getByRole("button", { name: "Assignments", exact: true }).click();
-  await page
-    .getByRole("button", { name: "Add assignment", exact: true })
-    .click();
-  await page
-    .getByRole("textbox", { name: "Name", exact: true })
-    .fill("Practice for Friday");
-  await page
-    .getByRole("textbox", { name: "Details", exact: true })
-    .fill("Writing Task 2 · Friday");
-  await page.getByRole("button", { name: "Save record" }).click();
-  await expect(
-    page.getByRole("cell", { name: "Practice for Friday", exact: true }),
-  ).toBeVisible();
-  await page.reload();
-  await page.getByRole("button", { name: "Assignments", exact: true }).click();
-  await expect(
-    page.getByRole("cell", { name: "Practice for Friday", exact: true }),
-  ).toBeVisible();
-  await page.getByRole("button", { name: "Reviews", exact: true }).click();
-  await page
-    .getByRole("button", { name: "Review", exact: true })
-    .first()
-    .click();
-  await page
-    .getByRole("textbox", { name: "Teacher feedback" })
-    .fill("Clear main idea. Develop one concrete example.");
-  await page.getByRole("button", { name: "Save feedback locally" }).click();
-  await expect(page.getByText("Reviewed", { exact: true })).toBeVisible();
-});
-test("admin CRUD can add, edit, search and delete a user", async ({ page }) => {
-  await demo(page, "Admin");
-  await page.getByRole("button", { name: "Add user", exact: true }).click();
-  await page
-    .getByRole("textbox", { name: "Name", exact: true })
-    .fill("Test Learner");
-  await page
-    .getByRole("textbox", { name: "Details", exact: true })
-    .fill("Local record");
-  await page.getByRole("button", { name: "Save record" }).click();
-  await page
-    .getByRole("button", { name: "Edit Test Learner", exact: true })
-    .click();
-  await page
-    .getByRole("textbox", { name: "Name", exact: true })
-    .fill("Updated Learner");
-  await page.getByRole("button", { name: "Save record" }).click();
-  await page.getByRole("textbox", { name: "Search users" }).fill("Updated");
-  await expect(
-    page.getByRole("cell", { name: "Updated Learner", exact: true }),
-  ).toBeVisible();
-  await page.getByRole("button", { name: "Delete Updated Learner" }).click();
-  await page
-    .getByRole("button", { name: "Delete record", exact: true })
-    .click();
-  await expect(page.getByText("Room for something new")).toBeVisible();
-});
-test("theme, language and goals persist", async ({ page }) => {
-  await page.goto("/settings");
-  await page.getByRole("button", { name: "Dark", exact: true }).click();
-  await page
-    .getByRole("combobox", { name: "Interface language", exact: true })
-    .selectOption("uz");
-  await page
-    .getByRole("combobox", { name: "Target band", exact: true })
-    .selectOption("8");
-  await page.reload();
-  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
-  await expect(page.locator("html")).toHaveAttribute("lang", "uz");
-  await page.goto("/dashboard");
-  await expect(
-    page.getByRole("heading", { name: /Xayrli tong/ }),
-  ).toBeVisible();
-  await expect(
-    page.locator(".summary-number").filter({ hasText: "Band 8.0" }),
-  ).toBeVisible();
-});
-test("sample mock prevents unfinished progression and runs all four skills", async ({
-  page,
-  context,
-}) => {
-  await context.grantPermissions(["microphone"]);
-  await page.goto("/mock-exams");
-  await page.getByRole("button", { name: "Begin sample exam" }).click();
-  await expect(
-    page.getByRole("button", { name: "Next: Reading" }),
-  ).toBeDisabled();
-  for (const next of ["Reading", "Writing"]) {
-    await page.getByRole("button", { name: "Submit answers" }).click();
-    await page.getByRole("button", { name: "Confirm submission" }).click();
-    await page
-      .getByRole("button", { name: `Next: ${next}`, exact: true })
-      .click();
-  }
-  await page
-    .getByRole("textbox", { name: "Your writing response" })
-    .fill("This is an original response for the sample exam.");
-  await page.getByRole("button", { name: "Submit writing" }).click();
-  await page.getByRole("button", { name: "Save submission" }).click();
-  await page.getByRole("button", { name: "Next: Speaking" }).click();
-  await page
-    .getByRole("button", { name: "Start recording", exact: true })
-    .click();
-  await page.waitForTimeout(1000);
-  await page.getByRole("button", { name: "Stop recording" }).click();
-  await page.getByRole("button", { name: "Save practice session" }).click();
-  await page.getByRole("button", { name: "Finish sample exam" }).click();
-  await page.getByRole("button", { name: "Confirm and finish" }).click();
-  await expect(
-    page.getByRole("heading", { name: "Sample exam saved" }),
-  ).toBeVisible();
-  await expect(page.getByText("No overall band is calculated")).toBeVisible();
-});
-for (const width of [320, 375, 430, 768, 1024, 1440, 1920])
-  test(`responsive pages at ${width}px have no horizontal overflow`, async ({
-    page,
-  }) => {
-    await page.setViewportSize({ width, height: 900 });
-    for (const route of [
-      "/",
-      "/dashboard",
-      "/practice/reading",
-      "/practice/writing",
-      "/practice/speaking",
-      "/mock-exams",
-      "/courses",
-      "/progress",
-      "/settings",
-    ]) {
-      await page.goto(route);
-      await expect(page.locator("h1")).toBeVisible();
-      expect(
-        await page.evaluate(
-          () => document.documentElement.scrollWidth <= window.innerWidth + 1,
-        ),
-        `${route} overflow at ${width}`,
-      ).toBe(true);
-    }
-    if (width < 701) {
-      await page.getByRole("button", { name: "Open navigation" }).click();
-      await page
-        .getByRole("navigation", { name: "Main navigation" })
-        .getByRole("link", { name: "Reading", exact: true })
-        .click();
-      await expect(page).toHaveURL(/practice\/reading/);
-      await expect(
-        page
-          .getByRole("button", { name: "Close navigation", exact: true })
-          .last(),
-      ).not.toBeInViewport();
-    }
-  });

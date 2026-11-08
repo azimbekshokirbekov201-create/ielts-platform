@@ -1,0 +1,11 @@
+# IELTS Academy architecture
+
+Next.js Route Handlers validate requests with Zod, verify Supabase sessions with `getUser`, and use the caller's JWT for database and Storage access. RLS remains effective even if a caller bypasses the application API. The service key is server-only: shared rate limits, admin Auth operations, and validated AI output persistence. No role is read from client metadata.
+
+Versioned PostgreSQL migrations define identity, course hierarchy, normalized objective tests and private keys, attempts, subjective tasks and evaluations, mock exams, onboarding, activity, consent, publications, media, and audit records. Transactional RPCs own scoring, deadlines, onboarding completion, rewards, and quota reservation. No educational content is seeded. The onboarding badge is a rule definition, not a student award.
+
+Test attempts retain server deadlines and cannot accept autosaves after expiry. Submission is idempotent, locked, and server marked. Used objective tests are immutable except publication status. An administrator supplies band thresholds for the test/variant; without a conversion, only the genuine raw score is shown. Do not use full-length IELTS conversions for short tests. Mock sections link only to the same student's completed work started after the mock, in order. Subjective results remain pending until reviewed; teacher evaluations supersede AI estimates.
+
+AI is disabled by default. Consent and global/per-user daily reservations are enforced transactionally; failed requests consume quota to prevent retry abuse. OpenAI has a bounded response budget, timeouts and a transient retry. Speaking transcripts may receive text feedback but no pronunciation or overall band from text alone. Audio is sent for transcription only with explicit account consent. Token counts and configurable cost estimates are recorded, not presented as provider billing.
+
+Frontend uses the original self-hosted typography, CSS tokens and components. All active learner/admin/teacher screens use API data. Legacy demo components are retained as source references but are not routed or imported by the production platform. No localStorage role or result is authoritative. XP and streak widgets are hidden until their complete rules exist.

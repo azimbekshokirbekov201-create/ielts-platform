@@ -10,6 +10,7 @@ export default async function Page({
   if (
     ![
       "/dashboard",
+      "/onboarding",
       "/login",
       "/register",
       "/forgot-password",
