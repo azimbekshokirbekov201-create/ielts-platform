@@ -486,7 +486,7 @@ describe("SQLite API integration (real migrations, passwords and sessions)", () 
             origin: "http://localhost:3000",
             "content-type": "audio/wav",
           },
-          body: bytes,
+          body: new Uint8Array(bytes),
         }),
         params,
       );
@@ -762,5 +762,298 @@ describe("SQLite API integration (real migrations, passwords and sessions)", () 
         )
       ).id,
     ).toBe(student);
+  });
+  it("allows teachers to create and publish their own content and rejects other ownership", async () => {
+    as(teacher);
+    const created = await api("admin/content/writing_tasks", "POST", {
+      title: "Teacher writing",
+      prompt: "Discuss learning",
+      task_number: 2,
+      status: "draft",
+      access_tier: "premium",
+    });
+    expect(created.status).toBe(200);
+    const owned = await api("admin/content/writing_tasks");
+    expect(owned.status).toBe(200);
+    expect(owned.data.length).toBeGreaterThan(0);
+    expect(
+      owned.data.every((x: { creator_id: string }) => x.creator_id === teacher),
+    ).toBe(true);
+    expect(
+      (
+        await api("admin/content/writing_tasks/" + created.data.id, "PATCH", {
+          status: "published",
+        })
+      ).status,
+    ).toBe(200);
+    as(other);
+    expect(
+      (
+        await api("admin/content/writing_tasks/" + created.data.id, "PATCH", {
+          prompt: "Escalate",
+        })
+      ).status,
+    ).toBe(403);
+    as(teacher);
+    expect((await api("admin/subscriptions")).status).toBe(403);
+    const foreign = (
+      await new Store(prisma, admin, true).all("writing_tasks")
+    ).find((x) => x.creator_id === admin);
+    if (foreign)
+      expect(
+        (
+          await api("admin/content/writing_tasks/" + foreign.id, "PATCH", {
+            prompt: "Steal",
+          })
+        ).status,
+      ).toBe(403);
+    const copy = await api(
+      "admin/content/writing_tasks/" + created.data.id + "/duplicate",
+      "POST",
+      {},
+    );
+    expect(copy.status).toBe(200);
+    expect(copy.data.status).toBe("draft");
+  });
+  it("redeems secure codes, stacks grants, rejects repeats and hides code digests", async () => {
+    as(admin);
+    const c = await api("admin/subscriptions/codes", "POST", {
+      days: 30,
+      limit: 2,
+      label: "Test promo",
+    });
+    expect(c.status).toBe(200);
+    expect(c.data.code.length).toBeGreaterThanOrEqual(16);
+    const list = await api("admin/subscriptions");
+    expect(JSON.stringify(list)).not.toContain(c.data.code);
+    expect(JSON.stringify(list)).not.toContain("lookup");
+    as(student);
+    const before = await api("subscription");
+    expect(before.data.tier).toBe("free");
+    expect(
+      (await api("subscription/redeem", "POST", { code: c.data.code })).status,
+    ).toBe(200);
+    expect(
+      (await api("subscription/redeem", "POST", { code: c.data.code })).status,
+    ).toBe(409);
+    const first = (await api("subscription")).data;
+    expect(first.tier).toBe("premium");
+    as(admin);
+    expect(
+      (
+        await api("admin/subscriptions/grant", "POST", {
+          user_id: student,
+          days: 7,
+        })
+      ).status,
+    ).toBe(200);
+    as(student);
+    expect(
+      Date.parse((await api("subscription")).data.expires_at) -
+        Date.parse(first.expires_at),
+    ).toBe(7 * 86400000);
+  });
+  it("serializes concurrent redemption and enforces expiry, revocation and limits", async () => {
+    as(admin);
+    const code = (
+      await api("admin/subscriptions/codes", "POST", { days: 7, limit: 1 })
+    ).data;
+    const { subscriptionRequest } = await import("@/server/subscriptions");
+    const redeem = (uid: string) =>
+      subscriptionRequest(
+        new Request("http://localhost:3000/api/subscription/redeem", {
+          method: "POST",
+          body: JSON.stringify({ code: code.code }),
+        }),
+        uid,
+        ["subscription", "redeem"],
+      );
+    const results = await Promise.allSettled([redeem(student), redeem(other)]);
+    expect(results.filter((x) => x.status === "fulfilled")).toHaveLength(1);
+    as(admin);
+    const expired = (
+      await api("admin/subscriptions/codes", "POST", {
+        days: 7,
+        limit: 1,
+        expires_at: "2020-01-01T00:00:00Z",
+      })
+    ).data;
+    as(other);
+    expect(
+      (await api("subscription/redeem", "POST", { code: expired.code })).status,
+    ).toBe(409);
+    as(admin);
+    const revoked = (
+      await api("admin/subscriptions/codes", "POST", { days: 7, limit: 1 })
+    ).data;
+    expect(
+      (
+        await api("admin/subscriptions/code", "POST", {
+          id: revoked.id,
+          revoke: true,
+        })
+      ).status,
+    ).toBe(200);
+    as(other);
+    expect(
+      (await api("subscription/redeem", "POST", { code: revoked.code })).status,
+    ).not.toBe(200);
+  });
+  it("gates premium API content and media while retaining historical progress after expiry", async () => {
+    const s = new Store(prisma, admin, true);
+    const c = await s.add("courses", {
+      title: "Premium course",
+      status: "published",
+      access_tier: "premium",
+    });
+    const m = await s.add("course_modules", {
+      course_id: c.id,
+      title: "Module",
+    });
+    const l = await s.add("lessons", {
+      module_id: m.id,
+      title: "Protected",
+      status: "published",
+      video_url: admin + "/private.mp4",
+    });
+    as(other);
+    for (const grant of (await s.all("subscriptions")).filter(
+      (x) => x.user_id === other,
+    ))
+      await s.put("subscriptions", {
+        ...grant,
+        expires_at: "2000-01-01T00:00:00Z",
+      });
+    expect(await as(other).visible("lessons", l)).toBe(false);
+    expect(
+      await local.mediaAllowed(
+        as(other),
+        "course-media",
+        admin + "/private.mp4",
+      ),
+    ).toBe(false);
+    const catalog = await api("catalog/courses");
+    expect(catalog.data.find((x: { id: string }) => x.id === c.id).locked).toBe(
+      true,
+    );
+    as(admin);
+    const grant = (
+      await api("admin/subscriptions/grant", "POST", {
+        user_id: other,
+        days: 7,
+      })
+    ).data;
+    expect(await as(other).visible("lessons", l)).toBe(true);
+    expect((await rpc(other, "enroll_course", { c: c.id })).error).toBeNull();
+    expect((await rpc(other, "complete_lesson", { l: l.id })).error).toBeNull();
+    as(admin);
+    await api("admin/subscriptions/revoke", "POST", { id: grant.id });
+    expect(await as(other).visible("lessons", l)).toBe(false);
+    as(other);
+    expect(
+      (await api("dashboard")).data.lesson_progress.some(
+        (x: { lesson_id: string }) => x.lesson_id === l.id,
+      ),
+    ).toBe(true);
+  });
+  it("authorizes teacher media uploads and rejects disguised files and student content uploads", async () => {
+    const media = await import("@/app/api/local-media/[...file]/route");
+    as(teacher);
+    const issued = await api("media-upload", "POST", {
+      bucket: "course-media",
+      type: "audio/wav",
+      size: 44,
+    });
+    expect(issued.status).toBe(200);
+    const path = issued.data.path;
+    const params = {
+      params: Promise.resolve({ file: ["course-media", ...path.split("/")] }),
+    };
+    const request = (bytes: Buffer) =>
+      media.PUT(
+        new Request("http://localhost:3000" + issued.data.signedUrl, {
+          method: "PUT",
+          headers: {
+            origin: "http://localhost:3000",
+            "content-type": "audio/wav",
+          },
+          body: new Uint8Array(bytes),
+        }),
+        params,
+      );
+    expect(
+      (await request(Buffer.from("<script>bad file</script>"))).status,
+    ).toBe(400);
+    const wave = Buffer.alloc(44);
+    wave.write("RIFF");
+    wave.write("WAVE", 8);
+    expect((await request(wave)).status).toBe(200);
+    expect(
+      (await api("media-finalize", "POST", { bucket: "course-media", path }))
+        .status,
+    ).toBe(200);
+    expect((await api("media-remove", "POST", { path })).status).toBe(200);
+    expect(
+      (
+        await media.GET(
+          new Request("http://localhost:3000" + issued.data.signedUrl),
+          params,
+        )
+      ).status,
+    ).toBe(403);
+    as(other);
+    expect(
+      (
+        await api("media-upload", "POST", {
+          bucket: "course-media",
+          type: "audio/wav",
+          size: 44,
+        })
+      ).status,
+    ).toBe(403);
+  });
+  it("changes access tiers without resetting publication or altering earned grades", async () => {
+    as(admin);
+    const row = await api("admin/content/lessons", "POST", {
+      module_id: (await new Store(prisma, admin, true).all("course_modules"))[0]
+        .id,
+      title: "YouTube test lesson",
+      body: "Content",
+      status: "published",
+    });
+    expect(row.status).toBe(200);
+    const patched = await api("admin/content/lessons/" + row.data.id, "PATCH", {
+      video_url: "https://youtu.be/AbCdEf123_-",
+    });
+    expect(patched.data.status).toBe("published");
+    const test = (await new Store(prisma, admin, true).all("tests")).find(
+      (x) => x.status === "published",
+    );
+    expect(
+      (
+        await api("admin/content/tests/" + test!.id, "PATCH", {
+          access_tier: "premium",
+        })
+      ).status,
+    ).toBe(200);
+  });
+  it("never exposes subscription administration through a GET redemption endpoint", async () => {
+    as(other);
+    const result = await api("subscription/redeem");
+    expect(result.status).toBe(405);
+    expect(result).not.toHaveProperty("data");
+  });
+  it("rejects a teacher linking another owner private upload", async () => {
+    as(teacher);
+    const own = (
+      await new Store(prisma, teacher, true).all("writing_tasks")
+    ).find((x) => x.creator_id === teacher);
+    expect(
+      (
+        await api("admin/content/writing_tasks/" + own!.id, "PATCH", {
+          image_path: admin + "/private.png",
+        })
+      ).status,
+    ).toBe(403);
   });
 });

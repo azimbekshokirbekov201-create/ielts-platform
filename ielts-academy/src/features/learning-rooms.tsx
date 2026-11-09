@@ -1,5 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
+import { RichTextView } from "./rich-text";
+import { PremiumLock } from "./subscriptions";
 import Link from "next/link";
 import { LearningHeading, learningSkills } from "./premium-ui";
 import { ArrowUpRight, BookOpen, Clock } from "lucide-react";
@@ -73,11 +75,13 @@ export function Catalog({
                   )}
                   <button
                     className="button outline"
-                    onClick={() => onSelect(row)}
+                    onClick={() => !row.locked && onSelect(row)}
+                    disabled={!!row.locked}
                   >
                     {t("start")}
                     <ArrowUpRight size={16} />
                   </button>
+                  {!!row.locked && <PremiumLock />}
                 </div>
               </article>
             );
@@ -282,7 +286,13 @@ export function PracticeRoom({
                 {(section.passages as Row[]).map((p) => (
                   <article key={p.id}>
                     <h3>{p.title}</h3>
-                    <p className="preserve-text">{String(p.body)}</p>
+                    <RichTextView text={String(p.body)} />
+                    {!!p.attachment_path && (
+                      <PrivateMedia
+                        path={String(p.attachment_path)}
+                        label="Passage attachment"
+                      />
+                    )}
                   </article>
                 ))}
               </div>
@@ -453,7 +463,18 @@ export function WritingRoom({
     <div className="writing-workspace">
       <section className="card writing-prompt">
         <h1>{task.title}</h1>
-        <p className="preserve-text">{String(task.prompt)}</p>
+        {!!task.suggested_words && (
+          <p>
+            {t("suggested_words")}: {String(task.suggested_words)}
+          </p>
+        )}
+        {!!task.media_path && (
+          <PrivateMedia
+            path={String(task.media_path)}
+            label="Task attachment"
+          />
+        )}
+        <RichTextView text={String(task.prompt)} />
         {!!task.image_path && (
           <PrivateMedia path={String(task.image_path)} image />
         )}
@@ -594,10 +615,16 @@ export function SpeakingRoom({
     <div className="speaking-layout">
       <article className="card cue-card">
         <h1>{task.title}</h1>
+        {!!task.media_path && (
+          <PrivateMedia
+            path={String(task.media_path)}
+            label="Task attachment"
+          />
+        )}
         <p>
           {t("part")} {String(task.part)}
         </p>
-        <p className="preserve-text">{String(task.prompt)}</p>
+        <RichTextView text={String(task.prompt)} />
         <p>
           {t("preparation_seconds")}: {String(task.preparation_seconds)} ·{" "}
           {t("response_seconds")}: {String(task.response_seconds)}

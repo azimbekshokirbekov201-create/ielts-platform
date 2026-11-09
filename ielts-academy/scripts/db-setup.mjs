@@ -1,12 +1,19 @@
 import { mkdirSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
-import { DatabaseSync } from "node:sqlite";
+import { DatabaseSync, backup } from "node:sqlite";
 import { databaseUrl } from "./db-config.mjs";
 const path = fileURLToPath(databaseUrl);
 mkdirSync(dirname(path), { recursive: true });
+const existed = existsSync(path);
 const db = new DatabaseSync(path);
+if (existed) {
+  const destination = path + ".backup-" + Date.now() + ".db";
+  await backup(db, destination);
+  console.log("Database backup: " + destination);
+}
 db.exec(
   "PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;",
 );

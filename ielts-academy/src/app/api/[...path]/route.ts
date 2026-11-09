@@ -1,3 +1,8 @@
+import { unlink } from "node:fs/promises";
+import { privatePath } from "@/server/local/client";
+import { subscriptionRequest } from "@/server/subscriptions";
+import { Store } from "@/server/local/engine";
+import { prisma } from "@/server/local/database";
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { ApiError, serviceDb, userDb } from "@/server/local/client";
@@ -17,7 +22,10 @@ export const dynamic = "force-dynamic";
 const result = (data: unknown, status = 200) =>
   Response.json({ data }, { status, headers: { "Cache-Control": "no-store" } });
 function checked<T>(r: { data?: T; error: unknown }): T {
-  if (r.error) throw new ApiError(409, "operation_rejected");
+  if (r.error) {
+    if (r.error instanceof ApiError) throw r.error;
+    throw new ApiError(409, "operation_rejected");
+  }
   return r.data as T;
 }
 async function input(req: Request) {
@@ -143,6 +151,8 @@ async function handler(
         await db.from("user_roles").select("role").eq("user_id", user.id),
       ) || []
     ).map((x) => x.role);
+    if (path[0] === "subscription" || key.startsWith("admin/subscriptions"))
+      return result(await subscriptionRequest(req, user.id, path));
     const admin = () => {
       if (!roles.includes("ADMIN")) throw new ApiError(403, "forbidden");
     };
@@ -239,21 +249,33 @@ async function handler(
       method === "GET" &&
       catalogTables.includes(path[1])
     ) {
-      let query = db
-        .from(path[1])
-        .select("*")
-        .eq("status", "published")
-        .order("created_at", { ascending: false });
-      if (url.searchParams.has("skill"))
-        query = query.eq(
-          "skill",
-          z.enum(["listening", "reading"]).parse(url.searchParams.get("skill")),
+      const store = new Store(prisma, user.id);
+      const rows = (await store.all(path[1]))
+        .filter(
+          (x) =>
+            x.status === "published" &&
+            (!url.searchParams.has("skill") ||
+              x.skill === url.searchParams.get("skill")),
+        )
+        .sort((a, b) =>
+          String(b.created_at).localeCompare(String(a.created_at)),
         );
-      const page = Math.max(
-        0,
-        Math.min(Number(url.searchParams.get("page")) || 0, 10000),
-      );
-      return result(checked(await query.range(page * 20, page * 20 + 19)));
+      const selected = rows.slice(pageOffset * 20, pageOffset * 20 + 20);
+      const output = [];
+      for (const row of selected) {
+        if (await store.visible(path[1], row)) output.push(row);
+        else if (row.access_tier === "premium")
+          output.push({
+            id: row.id,
+            title: row.title,
+            skill: row.skill,
+            variant: row.variant,
+            status: row.status,
+            access_tier: "premium",
+            locked: true,
+          });
+      }
+      return result(output);
     }
     if (
       path[0] === "task" &&
@@ -498,6 +520,44 @@ async function handler(
         ),
       );
     }
+    if (key === "media-remove" && method === "POST") {
+      teacher();
+      const p = z
+        .object({ path: z.string().max(1000) })
+        .parse(await input(req));
+      const target = privatePath("course-media", p.path);
+      if (!roles.includes("ADMIN") && p.path.split("/")[0] !== user.id)
+        throw new ApiError(403, "forbidden");
+      await prisma.$transaction(async (tx) => {
+        await tx.rateLimit.upsert({
+          where: { key: "media-lock" },
+          create: { key: "media-lock", start: new Date(), hits: 1 },
+          update: { hits: { increment: 1 } },
+        });
+        const store = new Store(tx, user.id, true);
+        for (const row of await tx.entity.findMany())
+          if (
+            !["media_assets", "upload_metadata", "audit_logs"].includes(
+              row.kind,
+            ) &&
+            JSON.stringify(row.data).includes(p.path)
+          )
+            throw new ApiError(409, "file_in_use");
+        await unlink(target).catch((e) => {
+          if (e.code !== "ENOENT") throw e;
+        });
+        for (const row of await store.all("media_assets"))
+          if (row.storage_path === p.path)
+            await tx.entity.delete({
+              where: { kind_id: { kind: "media_assets", id: row.id } },
+            });
+        await tx.entity.deleteMany({
+          where: { kind: "upload_metadata", id: "course-media:" + p.path },
+        });
+        await store.audit("remove_media", "course-media", p.path);
+      });
+      return result(true);
+    }
     if (key === "media-upload" && method === "POST") {
       const p = z
         .object({
@@ -506,7 +566,7 @@ async function handler(
           size: z.number().int().min(1).max(26214400),
         })
         .parse(await input(req));
-      if (p.bucket === "course-media") admin();
+      if (p.bucket === "course-media") teacher();
       const mimes: Record<string, string> = {
         "audio/webm": "webm",
         "audio/ogg": "ogg",
@@ -539,9 +599,10 @@ async function handler(
         .object({
           bucket: z.enum(["speaking", "course-media"]),
           path: z.string().max(1000),
+          name: z.string().max(255).optional(),
         })
         .parse(await input(req));
-      if (p.bucket === "course-media") admin();
+      if (p.bucket === "course-media") teacher();
       if (p.path.split("/")[0] !== user.id)
         throw new ApiError(403, "forbidden");
       const file = checked(await db.storage.from(p.bucket).download(p.path));
@@ -557,16 +618,19 @@ async function handler(
       )
         throw new ApiError(400, "invalid_file");
       checked(
-        await serviceDb().from("media_assets").upsert(
-          {
-            user_id: user.id,
-            bucket: p.bucket,
-            storage_path: p.path,
-            mime_type: type,
-            size_bytes: file.size,
-          },
-          { onConflict: "storage_path" },
-        ),
+        await serviceDb()
+          .from("media_assets")
+          .upsert(
+            {
+              user_id: user.id,
+              bucket: p.bucket,
+              storage_path: p.path,
+              mime_type: type,
+              original_name: p.name || null,
+              size_bytes: file.size,
+            },
+            { onConflict: "storage_path" },
+          ),
       );
       return result({ path: p.path });
     }
@@ -574,7 +638,7 @@ async function handler(
       const form = await req.formData(),
         file = form.get("file"),
         bucket = z.enum(["speaking", "course-media"]).parse(form.get("bucket"));
-      if (bucket === "course-media") admin();
+      if (bucket === "course-media") teacher();
       if (!(file instanceof File) || file.size < 1 || file.size > 26214400)
         throw new ApiError(400, "invalid_file");
       const mimes: Record<string, string> = {
@@ -691,7 +755,8 @@ async function handler(
       }
     }
     if (path[0] === "admin") {
-      admin();
+      if (path[1] === "content") teacher();
+      else admin();
       if (key === "admin/stats" && method === "GET")
         return result(checked(await db.rpc("admin_statistics")));
       if (key === "admin/users" && method === "GET")
@@ -782,6 +847,13 @@ async function handler(
         const schema = contentSchemas[table];
         if (!schema) throw new ApiError(404, "not_found");
         const idColumn = table === "answer_keys" ? "question_id" : "id";
+        if (method === "GET" && !roles.includes("ADMIN")) {
+          const store = new Store(prisma, user.id);
+          const owned = [];
+          for (const row of await store.all(table))
+            if (await store.editor(table, row)) owned.push(row);
+          return result(owned.slice(pageOffset * 100, pageOffset * 100 + 100));
+        }
         if (method === "GET")
           return result(
             checked(
@@ -789,6 +861,59 @@ async function handler(
                 .from(table)
                 .select("*")
                 .range(pageOffset * 100, pageOffset * 100 + 99),
+            ),
+          );
+        if (method === "POST" && path[4] === "duplicate")
+          return result(
+            await prisma.$transaction(
+              async (tx) => {
+                const store = new Store(tx, user.id);
+                const root = await store.get(table, uuid.parse(path[3]));
+                if (
+                  !root ||
+                  !(await store.visible(table, root)) ||
+                  (!(await store.admin()) && !(await store.editor(table, root)))
+                )
+                  throw new ApiError(403, "forbidden");
+                const links: Record<string, [string, string][]> = {
+                  tests: [["test_sections", "test_id"]],
+                  test_sections: [
+                    ["passages", "section_id"],
+                    ["questions", "section_id"],
+                  ],
+                  questions: [
+                    ["question_options", "question_id"],
+                    ["answer_keys", "question_id"],
+                  ],
+                  courses: [["course_modules", "course_id"]],
+                  course_modules: [["lessons", "module_id"]],
+                  lessons: [["lesson_resources", "lesson_id"]],
+                  mock_exams: [["mock_exam_sections", "mock_exam_id"]],
+                };
+                async function copy(
+                  kind: string,
+                  row: Record<string, unknown>,
+                  override: Record<string, unknown> = {},
+                ): Promise<Record<string, unknown>> {
+                  const data = { ...row, ...override };
+                  delete data.id;
+                  delete data.created_at;
+                  delete data.updated_at;
+                  delete data.creator_id;
+                  if ("status" in data) data.status = "draft";
+                  const result = await store.mutate(kind, "insert", data);
+                  for (const [child, fk] of links[kind] || [])
+                    for (const r of (await store.all(child)).filter(
+                      (x) => x[fk] === row.id,
+                    ))
+                      await copy(child, r, { [fk]: result.id });
+                  return result;
+                }
+                return copy(table, root, {
+                  title: String(root.title || "Content") + " (copy)",
+                });
+              },
+              { timeout: 15000 },
             ),
           );
         if (method === "POST")
@@ -804,17 +929,25 @@ async function handler(
             ),
           );
         const id = uuid.parse(path[3]);
-        if (method === "PATCH")
+        if (method === "PATCH") {
+          const raw = await input(req);
+          const parsed = schema.partial().parse(raw);
+          const patch = Object.fromEntries(
+            Object.entries(parsed).filter(([key]) =>
+              Object.prototype.hasOwnProperty.call(raw, key),
+            ),
+          );
           return result(
             checked(
               await db
                 .from(table)
-                .update(schema.partial().parse(await input(req)))
+                .update(patch)
                 .eq(idColumn, id)
                 .select()
                 .single(),
             ),
           );
+        }
         if (method === "DELETE")
           return result(
             checked(

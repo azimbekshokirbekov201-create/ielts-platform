@@ -226,6 +226,12 @@ export function privatePath(bucket: string, path: string) {
 }
 export async function mediaAllowed(store: Store, bucket: string, path: string) {
   if (await store.admin()) return true;
+  if (
+    bucket === "course-media" &&
+    path.split("/")[0] === store.uid &&
+    (await store.author())
+  )
+    return true;
   if (!store.uid) return false;
   if (bucket === "speaking") {
     if (path.split("/")[0] === store.uid) return true;
@@ -242,6 +248,8 @@ export async function mediaAllowed(store: Store, bucket: string, path: string) {
   }
   for (const [kind, field] of [
     ["lessons", "video_url"],
+    ["passages", "attachment_path"],
+    ["speaking_tasks", "media_path"],
     ["lesson_resources", "storage_path"],
     ["test_sections", "audio_path"],
     ["writing_tasks", "image_path"],
@@ -256,7 +264,7 @@ function storage(store: Store, bucket: string) {
       if (
         !store.uid ||
         path.split("/")[0] !== store.uid ||
-        (bucket === "course-media" && !(await store.admin()))
+        (bucket === "course-media" && !(await store.author()))
       )
         return { error: new ApiError(403, "forbidden"), data: null };
       privatePath(bucket, path);
@@ -278,7 +286,7 @@ function storage(store: Store, bucket: string) {
       try {
         if (
           path.split("/")[0] !== store.uid ||
-          (bucket === "course-media" && !(await store.admin()))
+          (bucket === "course-media" && !(await store.author()))
         )
           throw new ApiError(403, "forbidden");
         const target = privatePath(bucket, path);

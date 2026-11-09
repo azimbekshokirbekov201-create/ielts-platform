@@ -8536,3 +8536,48 @@ td:last-child {
 .premium-progress-summary .card {
   padding: 24px;
 }
+.youtube-player {
+  position: relative;
+  aspect-ratio: 16/9;
+  background: #101827;
+  border-radius: 12px;
+  overflow: hidden;
+  margin: 20px 0;
+}
+.youtube-player iframe {
+  border: 0;
+  width: 100%;
+  height: 100%;
+  position: absolute;
+  inset: 0;
+}
+.youtube-player > span {
+  color: white;
+  position: absolute;
+  inset: 40% 20%;
+  text-align: center;
+}
+.upload-dropzone {
+  border: 2px dashed var(--border);
+  padding: 20px;
+  border-radius: 12px;
+  display: flex;
+  gap: 12px;
+  flex-direction: column;
+  margin-top: 10px;
+}
+.upload-dropzone input {
+  max-width: 100%;
+  font-size: 12px;
+}
+.subscription-panel {
+  margin-top: 24px;
+}
+.skill-grid > button {
+  text-align: left;
+  background: var(--surface);
+  cursor: pointer;
+}
+.skill-grid > button h3 {
+  margin-top: 16px;
+}

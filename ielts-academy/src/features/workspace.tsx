@@ -17,7 +17,14 @@ export function RoleWorkspace({ role }: { role: "admin" | "teacher" }) {
           ? "YOUR ACADEMY, THOUGHTFULLY MANAGED"
           : "A LITTLE GUIDANCE. A LASTING DIFFERENCE."}
       </div>
-      {role === "admin" ? <ContentStudio /> : <TeacherWorkspace />}
+      {role === "admin" ? (
+        <ContentStudio />
+      ) : (
+        <>
+          <ContentStudio teacher />
+          <TeacherWorkspace />
+        </>
+      )}
     </div>
   );
 }

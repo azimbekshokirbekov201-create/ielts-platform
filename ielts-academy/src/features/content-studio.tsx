@@ -1,4 +1,8 @@
 "use client";
+import { RichEditor } from "./rich-text";
+import { FileUpload } from "./file-upload";
+import { SubscriptionManager } from "./subscriptions";
+import { learningSkills } from "./premium-ui";
 import { useEffect, useState } from "react";
 import { api, type Row } from "@/lib/api";
 import { uploadMedia } from "@/lib/media-upload";
@@ -23,6 +27,7 @@ const templates: Record<string, Record<string, unknown>> = {
   },
   lesson_resources: { lesson_id: "", title: "", storage_path: "" },
   tests: {
+    description: "",
     title: "",
     skill: "reading",
     variant: "academic",
@@ -31,7 +36,7 @@ const templates: Record<string, Record<string, unknown>> = {
     band_thresholds: null,
   },
   test_sections: { test_id: "", title: "", audio_path: null, position: 0 },
-  passages: { section_id: "", title: "", body: "" },
+  passages: { section_id: "", title: "", body: "", attachment_path: null },
   questions: {
     section_id: "",
     prompt: "",
@@ -46,6 +51,7 @@ const templates: Record<string, Record<string, unknown>> = {
     title: "",
     prompt: "",
     task_number: 2,
+    suggested_words: 250,
     image_path: null,
     duration_seconds: 2400,
     status: "draft",
@@ -54,6 +60,7 @@ const templates: Record<string, Record<string, unknown>> = {
     title: "",
     prompt: "",
     part: 1,
+    media_path: null,
     preparation_seconds: 60,
     response_seconds: 120,
     status: "draft",
@@ -104,37 +111,55 @@ const numbers = [
   "max_words",
   "points",
   "task_number",
+  "suggested_words",
   "part",
   "preparation_seconds",
   "response_seconds",
 ];
-export function ContentStudio() {
+for (const key of [
+  "courses",
+  "lessons",
+  "tests",
+  "writing_tasks",
+  "speaking_tasks",
+  "mock_exams",
+])
+  templates[key].access_tier = "free";
+enums.access_tier = ["free", "premium"];
+export function ContentStudio({ teacher = false }: { teacher?: boolean }) {
   const { t } = useApp();
   const [tab, setTab] = useState("content");
-  const stats = useResource<Record<string, number>>("admin/stats");
+  const stats = useResource<Record<string, number>>(
+    teacher ? "teacher/students" : "admin/stats",
+  );
   return (
     <>
-      <h1>{t("admin")}</h1>
-      <ResourceState {...stats}>
-        <div className="live-grid">
-          {Object.entries(stats.data || {}).map(([key, value]) => (
-            <div className="card" key={key}>
-              <span>
-                {t(
-                  key === "profiles"
-                    ? "users"
-                    : key === "test_attempts"
-                      ? "attempts"
-                      : key,
-                )}
-              </span>
-              <h2>{value ?? "—"}</h2>
-            </div>
-          ))}
-        </div>
-      </ResourceState>
+      <h1>{teacher ? "Content Studio" : t("admin")}</h1>
+      {!teacher && (
+        <ResourceState {...stats}>
+          <div className="live-grid">
+            {Object.entries(stats.data || {}).map(([key, value]) => (
+              <div className="card" key={key}>
+                <span>
+                  {t(
+                    key === "profiles"
+                      ? "users"
+                      : key === "test_attempts"
+                        ? "attempts"
+                        : key,
+                  )}
+                </span>
+                <h2>{value ?? "—"}</h2>
+              </div>
+            ))}
+          </div>
+        </ResourceState>
+      )}
       <div className="live-actions">
-        {["content", "users", "settings", "audit"].map((k) => (
+        {(teacher
+          ? ["content"]
+          : ["content", "users", "subscriptions", "settings", "audit"]
+        ).map((k) => (
           <button
             key={k}
             className={"button " + (tab === k ? "primary" : "outline")}
@@ -146,6 +171,8 @@ export function ContentStudio() {
       </div>
       {tab === "content" ? (
         <ContentEditor />
+      ) : tab === "subscriptions" ? (
+        <SubscriptionManager />
       ) : tab === "users" ? (
         <UserManager />
       ) : tab === "settings" ? (
@@ -165,6 +192,9 @@ function ContentEditor() {
     [preview, setPreview] = useState<Row | null>(null),
     [busy, setBusy] = useState(false);
   const [page, setPage] = useState(0);
+  const [skill, setSkill] = useState("");
+  const [search, setSearch] = useState("");
+  const [filter, setFilter] = useState("all");
   const r = useResource<Row[]>(
     "admin/content/" + table + (page ? "?page=" + page : ""),
   );
@@ -191,6 +221,33 @@ function ContentEditor() {
       alive = false;
     };
   }, [table, r.data]);
+  const [autosave, setAutosave] = useState("");
+  useEffect(() => {
+    if (!editing || editing.status !== "draft") return;
+    const timer = setTimeout(() => {
+      const payload = { ...values };
+      if (typeof payload.accepted === "string")
+        payload.accepted = payload.accepted.split("\n").filter(Boolean);
+      if (typeof payload.band_thresholds === "string") {
+        try {
+          payload.band_thresholds = JSON.parse(
+            payload.band_thresholds || "null",
+          );
+        } catch {
+          return;
+        }
+      }
+      setAutosave("Saving…");
+      void api(
+        "admin/content/" + table + "/" + (editing.id || editing.question_id),
+        "PATCH",
+        payload,
+      )
+        .then(() => setAutosave("Draft saved"))
+        .catch(() => setAutosave("Save all required fields to continue."));
+    }, 1500);
+    return () => clearTimeout(timer);
+  }, [values, editing, table]);
   function edit(row: Row) {
     setEditing(row);
     setValues(
@@ -208,6 +265,15 @@ function ContentEditor() {
   async function mutate(row: Row, action: string) {
     await run(async () => {
       const id = String(row.id || row.question_id);
+      if (action === "duplicate") {
+        await api(
+          "admin/content/" + table + "/" + id + "/duplicate",
+          "POST",
+          {},
+        );
+        await r.load();
+        return;
+      }
       if (action === "delete") {
         if (!window.confirm(t("confirm_delete"))) return;
         await api("admin/content/" + table + "/" + id, "DELETE");
@@ -222,6 +288,82 @@ function ContentEditor() {
   return (
     <section>
       <h2>{t("content")}</h2>
+      <div className="skill-grid">
+        {learningSkills.map((s) => (
+          <button
+            key={s.id}
+            className={"card skill-card " + s.color}
+            onClick={() => {
+              setSkill(s.id);
+              const table =
+                s.id === "writing"
+                  ? "writing_tasks"
+                  : s.id === "speaking"
+                    ? "speaking_tasks"
+                    : "tests";
+              setTable(table);
+              setEditing(null);
+              setValues({
+                ...templates[table],
+                ...(table === "tests" ? { skill: s.id } : {}),
+              });
+              setPage(0);
+            }}
+          >
+            <span className={"skill-icon " + s.color}>
+              <s.icon />
+            </span>
+            <h3>{t(s.id)}</h3>
+          </button>
+        ))}
+      </div>
+      {skill && (
+        <div className="live-actions">
+          <h2>{t(skill)}</h2>
+          <button
+            className="button primary"
+            onClick={() => {
+              const target =
+                skill === "writing"
+                  ? "writing_tasks"
+                  : skill === "speaking"
+                    ? "speaking_tasks"
+                    : "tests";
+              setTable(target);
+              setPage(0);
+              setEditing(null);
+              setValues({
+                ...templates[target],
+                ...(target === "tests" ? { skill } : {}),
+              });
+              document
+                .getElementById("content-builder")
+                ?.scrollIntoView({ behavior: "smooth" });
+            }}
+          >
+            + Add Test
+          </button>
+        </div>
+      )}
+      <div className="live-actions">
+        <input
+          className="input"
+          placeholder="Search content"
+          aria-label="Search content"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
+        <select
+          className="input"
+          aria-label="Filter status"
+          value={filter}
+          onChange={(e) => setFilter(e.target.value)}
+        >
+          {["all", "draft", "published", "archived"].map((x) => (
+            <option key={x}>{x}</option>
+          ))}
+        </select>
+      </div>
       <label className="field">
         {t("content")}
         <select
@@ -281,7 +423,8 @@ function ContentEditor() {
             }).finally(() => setBusy(false));
           }}
         >
-          <h3>
+          <span role="status">{autosave}</span>
+          <h3 id="content-builder">
             {t(editing ? "edit" : "create")} · {t(table)}
           </h3>
           {Object.entries(templates[table]).map(([key, defaultValue]) => {
@@ -296,7 +439,37 @@ function ContentEditor() {
             return (
               <label className="field" key={key}>
                 {t(key)}
-                {fk ? (
+                {["prompt", "body", "description"].includes(key) ? (
+                  <RichEditor
+                    label={t(key)}
+                    value={String(value || "")}
+                    onChange={(v) => change(key, v)}
+                  />
+                ) : [
+                    "audio_path",
+                    "image_path",
+                    "attachment_path",
+                    "media_path",
+                    "storage_path",
+                    "video_url",
+                  ].includes(key) ? (
+                  <>
+                    <input
+                      className="input"
+                      placeholder={
+                        key === "video_url"
+                          ? "YouTube link or uploaded video"
+                          : "Optional existing URL/path"
+                      }
+                      value={String(value || "")}
+                      onChange={(e) => change(key, e.target.value || null)}
+                    />
+                    <FileUpload
+                      value={String(value || "")}
+                      onChange={(v) => change(key, v || null)}
+                    />
+                  </>
+                ) : fk ? (
                   <select
                     className="input"
                     value={String(value || "")}
@@ -421,67 +594,87 @@ function ContentEditor() {
             {!r.data?.length ? (
               <Empty />
             ) : (
-              r.data.map((row, i) => (
-                <article
-                  className="card"
-                  key={String(row.id || row.question_id || i)}
-                >
-                  <h3>
-                    {String(
-                      row.title || row.prompt || row.label || row.question_id,
-                    )}
-                  </h3>
-                  <code>{String(row.id || row.question_id)}</code>
-                  {!!row.status && (
-                    <span className="badge">{t(String(row.status))}</span>
-                  )}
-                  <div className="live-actions">
-                    <button
-                      className="button outline"
-                      onClick={() => edit(row)}
-                    >
-                      {t("edit")}
-                    </button>
-                    <button
-                      className="button outline"
-                      onClick={() =>
-                        void run(async () => {
-                          setPreview(
-                            table === "tests"
-                              ? await api<Row>("test/" + row.id)
-                              : table === "courses"
-                                ? await api<Row>("course/" + row.id)
-                                : row,
-                          );
-                        })
-                      }
-                    >
-                      {t("preview")}
-                    </button>
+              r.data
+                .filter(
+                  (row) =>
+                    (!search ||
+                      String(row.title || row.prompt || " ")
+                        .toLowerCase()
+                        .includes(search.toLowerCase())) &&
+                    (filter === "all" || row.status === filter) &&
+                    (!skill || table !== "tests" || row.skill === skill),
+                )
+                .map((row, i) => (
+                  <article
+                    className="card"
+                    key={String(row.id || row.question_id || i)}
+                  >
+                    <h3>
+                      {String(
+                        row.title || row.prompt || row.label || row.question_id,
+                      )}
+                    </h3>
+                    <code>{String(row.id || row.question_id)}</code>
                     {!!row.status && (
+                      <span className="badge">{t(String(row.status))}</span>
+                    )}
+                    <div className="live-actions">
+                      <button
+                        className="button outline"
+                        onClick={() => edit(row)}
+                      >
+                        {t("edit")}
+                      </button>
+                      <button
+                        className="button outline"
+                        onClick={() => void mutate(row, "duplicate")}
+                      >
+                        Duplicate
+                      </button>
                       <button
                         className="button outline"
                         onClick={() =>
-                          void mutate(
-                            row,
-                            row.status === "published" ? "draft" : "published",
-                          )
+                          void run(async () => {
+                            setPreview(
+                              table === "tests"
+                                ? await api<Row>("test/" + row.id)
+                                : table === "courses"
+                                  ? await api<Row>("course/" + row.id)
+                                  : row,
+                            );
+                          })
                         }
                       >
-                        {t(
-                          row.status === "published" ? "unpublish" : "publish",
-                        )}
+                        {t("preview")}
                       </button>
-                    )}
-                    <button
-                      className="button ghost"
-                      onClick={() => void mutate(row, "delete")}
-                    >
-                      {t("remove")}
-                    </button>
-                  </div>
-                </article>
-              ))
+                      {!!row.status && (
+                        <button
+                          className="button outline"
+                          onClick={() =>
+                            void mutate(
+                              row,
+                              row.status === "published"
+                                ? "draft"
+                                : "published",
+                            )
+                          }
+                        >
+                          {t(
+                            row.status === "published"
+                              ? "unpublish"
+                              : "publish",
+                          )}
+                        </button>
+                      )}
+                      <button
+                        className="button ghost"
+                        onClick={() => void mutate(row, "delete")}
+                      >
+                        {t("remove")}
+                      </button>
+                    </div>
+                  </article>
+                ))
             )}
             <PageControls
               page={page}

@@ -1,3 +1,4 @@
+import { youtubeId, isYouTube } from "@/lib/youtube";
 import { z } from "zod";
 export const uuid = z.uuid();
 const title = z.string().trim().min(1).max(200);
@@ -7,8 +8,14 @@ const urlOrPath = z
   .string()
   .max(1000)
   .refine((v) => !v.includes("://") || /^https:\/\//.test(v), "HTTPS required")
+  .refine((v) => !isYouTube(v) || !!youtubeId(v), "Invalid YouTube link")
   .nullable();
-const base = { title, status: status.default("draft") };
+const base = {
+  access_tier: z.enum(["free", "premium"]).optional(),
+  description: text.optional(),
+  title,
+  status: status.default("draft"),
+};
 export const contentSchemas = {
   courses: z.object({ ...base, description: text.default("") }),
   course_modules: z.object({
@@ -51,6 +58,7 @@ export const contentSchemas = {
     position: z.number().int().min(0).default(0),
   }),
   passages: z.object({
+    attachment_path: z.string().max(1000).nullable().optional(),
     section_id: uuid,
     title: title.default("Passage"),
     body: text,
@@ -77,6 +85,7 @@ export const contentSchemas = {
     explanation: text.default(""),
   }),
   writing_tasks: z.object({
+    suggested_words: z.number().int().min(50).max(1000).optional(),
     ...base,
     prompt: text.min(1),
     task_number: z.union([z.literal(1), z.literal(2)]),
@@ -84,6 +93,7 @@ export const contentSchemas = {
     duration_seconds: z.number().int().min(60).max(7200).default(2400),
   }),
   speaking_tasks: z.object({
+    media_path: z.string().max(1000).nullable().optional(),
     ...base,
     prompt: text.min(1),
     part: z.number().int().min(1).max(3),

@@ -1,4 +1,5 @@
 "use client";
+import { SubscriptionPanel } from "./subscriptions";
 import Link from "next/link";
 import { Sun, Moon, ShieldCheck } from "lucide-react";
 import { Card, Badge } from "@/components/ui/primitives";
@@ -22,6 +23,7 @@ export function Settings() {
       <div className="settings-layout premium-settings">
         <div>
           <Preferences hideHeading />
+          <SubscriptionPanel />
         </div>
         <Card>
           <h2>Make it yours</h2>

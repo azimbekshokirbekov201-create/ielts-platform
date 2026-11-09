@@ -1,5 +1,44 @@
 export type Language = "en" | "uz" | "ru";
 const messages = {
+  suggested_words: [
+    "Suggested word count",
+    "Tavsiya etilgan so‘zlar soni",
+    "Рекомендуемое количество слов",
+  ],
+  attachment_path: ["Attachment", "Ilova", "Вложение"],
+  media_path: ["Media attachment", "Media fayl", "Медиафайл"],
+  file_in_use: [
+    "The file is still referenced by content. Save your changes; existing references keep their file.",
+    "Fayl kontentda ishlatilmoqda. O‘zgarishlarni saqlang; fayl saqlanadi.",
+    "Файл используется в материалах. Сохраните изменения; существующие ссылки сохранят файл.",
+  ],
+  subscriptions: ["Subscriptions", "Obunalar", "Подписки"],
+  access_tier: ["Access tier", "Kirish turi", "Уровень доступа"],
+  premium_access: ["Premium access", "Premium obuna", "Премиум-доступ"],
+  days_remaining: ["days remaining", "kun qoldi", "дней осталось"],
+  promo_code: ["Promo code", "Promo kod", "Промокод"],
+  activate_premium: [
+    "Activate Premium",
+    "Premium faollashtirish",
+    "Активировать Премиум",
+  ],
+  premium_required: [
+    "Premium access is required for this content.",
+    "Ushbu kontent uchun Premium kerak.",
+    "Для этого материала нужен Премиум.",
+  ],
+  promo_unavailable: [
+    "This code is unavailable or was already redeemed.",
+    "Kod mavjud emas yoki ishlatilgan.",
+    "Код недоступен или уже использован.",
+  ],
+  browse_files: ["Browse Files", "Fayl tanlash", "Выбрать файл"],
+  drop_files: [
+    "Drop a file here, or browse your computer.",
+    "Faylni shu yerga tashlang yoki tanlang.",
+    "Перетащите файл или выберите на компьютере.",
+  ],
+
   students: [
     "Registered students",
     "Ro‘yxatdan o‘tgan talabalar",

@@ -74,9 +74,45 @@ export class Store {
     if (!r || r.user_id !== this.uid) throw new ApiError(403, "forbidden");
     return r;
   }
+  async premium() {
+    return (await this.all("subscriptions")).some(
+      (x) =>
+        x.user_id === this.uid &&
+        !x.revoked_at &&
+        Date.parse(x.activated_at) <= Date.now() &&
+        Date.parse(x.expires_at) > Date.now(),
+    );
+  }
+  async editor(kind: string, r: Row): Promise<boolean> {
+    if (!(kind in contentSchemas) || !(await this.roles()).includes("TEACHER"))
+      return false;
+    const refs: Record<string, [string, string]> = {
+      course_modules: ["courses", "course_id"],
+      lessons: ["course_modules", "module_id"],
+      lesson_resources: ["lessons", "lesson_id"],
+      test_sections: ["tests", "test_id"],
+      questions: ["test_sections", "section_id"],
+      passages: ["test_sections", "section_id"],
+      question_options: ["questions", "question_id"],
+      answer_keys: ["questions", "question_id"],
+      mock_exam_sections: ["mock_exams", "mock_exam_id"],
+    };
+    if (refs[kind]) {
+      const [parent, field] = refs[kind];
+      const row = await this.get(parent, r[field]);
+      return !!row && (await this.editor(parent, row));
+    }
+    return r.creator_id === this.uid;
+  }
+  async author() {
+    return (await this.admin()) || (await this.roles()).includes("TEACHER");
+  }
   async visible(kind: string, r: Row): Promise<boolean> {
     if (await this.admin()) return true;
     if (!this.uid) return false;
+    if (await this.editor(kind, r)) return true;
+    if (["promo_codes", "promo_redemptions", "subscriptions"].includes(kind))
+      return false;
     if (kind === "profiles")
       return r.id === this.uid || (await this.review(r.id));
     if (kind === "user_roles") return r.user_id === this.uid;
@@ -89,11 +125,15 @@ export class Store {
         "mock_exams",
       ].includes(kind)
     )
-      return r.status === "published";
+      return (
+        r.status === "published" &&
+        (r.access_tier !== "premium" || (await this.premium()))
+      );
     if (kind === "course_modules") return this.parent("courses", r.course_id);
     if (kind === "lessons")
       return (
         r.status === "published" &&
+        (r.access_tier !== "premium" || (await this.premium())) &&
         (await this.parent("course_modules", r.module_id))
       );
     if (kind === "lesson_resources") return this.parent("lessons", r.lesson_id);
@@ -173,10 +213,44 @@ export class Store {
           input.teacher_id !== this.uid
         )
           throw new ApiError(403, "forbidden");
+      } else if (kind in contentSchemas) {
+        const candidate = existing || { ...input, creator_id: this.uid };
+        if (!(await this.admin()) && !(await this.editor(kind, candidate)))
+          throw new ApiError(403, "forbidden");
       } else await this.requireAdmin();
     }
-    const row = { ...existing, ...input };
+    const row: Row = {
+      ...existing,
+      ...input,
+      ...(kind in contentSchemas
+        ? { creator_id: existing?.creator_id || this.uid }
+        : {}),
+    };
     if (kind in contentSchemas) {
+      if (
+        !this.privileged &&
+        !(await this.admin()) &&
+        !(await this.editor(kind, row))
+      )
+        throw new ApiError(403, "forbidden");
+      if (!this.privileged && !(await this.admin()))
+        for (const field of [
+          "audio_path",
+          "image_path",
+          "video_url",
+          "storage_path",
+          "attachment_path",
+          "media_path",
+        ]) {
+          const path = row[field];
+          if (
+            path &&
+            path !== existing?.[field] &&
+            !String(path).startsWith("https://") &&
+            !String(path).startsWith(this.uid + "/")
+          )
+            throw new ApiError(403, "forbidden");
+        }
       const schema = contentSchemas[kind as keyof typeof contentSchemas];
       schema.parse(row);
       const refs: Record<string, string> = {
@@ -240,7 +314,7 @@ export class Store {
           ) ||
           Object.keys(input).some(
             (k) =>
-              k !== "status" &&
+              !["status", "access_tier"].includes(k) &&
               JSON.stringify(input[k]) !== JSON.stringify(existing?.[k]),
           )
         )
@@ -366,6 +440,23 @@ export class Store {
       return r.hits <= p.max_hits;
     }
     if (!this.uid && !this.privileged) throw new ApiError(401, "unauthorized");
+    if (["save_answers", "submit_test", "writing_draft"].includes(name)) {
+      const work =
+        name === "writing_draft"
+          ? p.submission
+            ? await this.get("writing_submissions", p.submission)
+            : null
+          : await this.get("test_attempts", p.a);
+      const kind = name === "writing_draft" ? "writing_tasks" : "tests";
+      const item = await this.get(kind, work?.task_id || work?.test_id || p.t);
+      if (
+        item?.access_tier === "premium" &&
+        !(await this.admin()) &&
+        !(await this.editor(kind, item)) &&
+        !(await this.premium())
+      )
+        throw new ApiError(403, "premium_required");
+    }
     if (name === "save_onboarding") {
       const old = await this.get("student_onboarding", this.uid!);
       const row = {

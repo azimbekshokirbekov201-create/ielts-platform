@@ -303,8 +303,57 @@ try {
   console.log(
     "PASS persisted writing/audio submissions and Student/Teacher/Admin access controls",
   );
+  const gated = await create("writing_tasks", {
+    title: "Premium writing",
+    prompt: "Premium task",
+    task_number: 2,
+    status: "published",
+    access_tier: "premium",
+  });
+  expect(
+    (
+      await context.request.get(origin + "/api/task/writing_tasks/" + gated.id)
+    ).status(),
+  ).not.toBe(200);
+  const promo = await api(admin, "admin/subscriptions/codes", "POST", {
+    days: 30,
+    limit: 1,
+    label: "Browser promo",
+  });
+  await page.goto(origin + "/settings");
+  await page.getByLabel("Promo code", { exact: true }).fill(promo.code);
+  await page
+    .getByRole("button", { name: "Activate Premium", exact: true })
+    .click();
+  await expect
+    .poll(async () => (await api(context.request, "subscription")).tier)
+    .toBe("premium");
+  expect(
+    (
+      await context.request.get(origin + "/api/task/writing_tasks/" + gated.id)
+    ).status(),
+  ).toBe(200);
+  await api(admin, "admin/content/lessons/" + lesson.id, "PATCH", {
+    video_url: "https://youtu.be/AbCdEf123_-",
+  });
+  await page.route("https://www.youtube-nocookie.com/**", (r) =>
+    r.fulfill({
+      body: "<html><body>Isolated external-player boundary</body></html>",
+      contentType: "text/html",
+    }),
+  );
+  await page.goto(origin + "/courses");
+  await choose("Preview");
+  await expect(page.locator('iframe[title="Video lesson"]')).toHaveAttribute(
+    "src",
+    "https://www.youtube-nocookie.com/embed/AbCdEf123_-",
+  );
+  console.log(
+    "PASS real promo redemption, Premium API unlock and validated YouTube lesson embedding",
+  );
   await stop();
   await start();
+  expect((await api(context.request, "subscription")).tier).toBe("premium");
   const me = await api(context.request, "me");
   expect(me.id).toBe(student.id);
   expect(me.onboarding.completed).toBe(true);

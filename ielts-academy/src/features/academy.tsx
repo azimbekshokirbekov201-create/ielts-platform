@@ -1,5 +1,7 @@
 "use client";
 import Link from "next/link";
+import { YouTubePlayer } from "./youtube-player";
+import { isYouTube } from "@/lib/youtube";
 import { Eye, EyeOff } from "lucide-react";
 import { SkillProgressChart } from "@/components/charts/skill-chart";
 import { learningScores } from "./premium-ui";
@@ -287,6 +289,7 @@ export function PrivateMedia({
       live = false;
     };
   }, [path, bucket]);
+  if (video && isYouTube(path)) return <YouTubePlayer url={path} />;
   if (!url)
     return (
       <button

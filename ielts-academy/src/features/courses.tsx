@@ -1,4 +1,6 @@
 "use client";
+import { RichTextView } from "./rich-text";
+import { PremiumLock } from "./subscriptions";
 import { useState, useEffect } from "react";
 import { ArrowLeft, ArrowUpRight, BookOpen, Check, Play } from "lucide-react";
 import { Card, Badge, Progress } from "@/components/ui/primitives";
@@ -116,7 +118,7 @@ export function Courses() {
               <>
                 <div className="eyebrow">YOUR NEXT STEP</div>
                 <h2>{lesson.title}</h2>
-                <p className="preserve-text">{String(lesson.body || "")}</p>
+                <RichTextView text={String(lesson.body || "")} />
                 {!!lesson.video_url && (
                   <PrivateMedia path={String(lesson.video_url)} video />
                 )}
@@ -189,12 +191,14 @@ export function Courses() {
                     <small>MAKE ROOM FOR YOUR POTENTIAL</small>
                   </div>
                   <div className="course-card-body">
+                    {!!c.locked && <PremiumLock />}
                     <Badge color={color}>IELTS ACADEMY</Badge>
                     <h3>{c.title}</h3>
                     <p>{String(c.description || "")}</p>
                     <div className="live-actions">
                       <button
                         className="button outline"
+                        disabled={!!c.locked}
                         onClick={() => void open(c.id)}
                       >
                         <Play size={15} />
@@ -202,6 +206,7 @@ export function Courses() {
                       </button>
                       <button
                         className="button primary"
+                        disabled={!!c.locked}
                         onClick={() => void enroll(c.id)}
                       >
                         {t("enroll")}
