@@ -1,0 +1,37 @@
+generator client {
+ provider = "prisma-client-js"
+ engineType = "client"
+ output = "../node_modules/.prisma/client"
+}
+datasource db {
+ provider = "sqlite"
+}
+model Account {
+ id String @id @default(uuid())
+ email String @unique
+ passwordHash String
+ sessions Session[]
+ createdAt DateTime @default(now())
+}
+model Session {
+ tokenHash String @id
+ accountId String
+ account Account @relation(fields:[accountId], references:[id], onDelete:Cascade)
+ expiresAt DateTime
+ @@index([accountId])
+}
+// API entities retain their snake_case contracts as validated JSON documents.
+// Identity/session integrity is relational; domain links and invariants are
+// enforced centrally in transactional services, never in browser state.
+model Entity {
+ id String
+ kind String
+ data Json
+ @@id([kind,id])
+ @@index([kind])
+}
+model RateLimit {
+ key String @id
+ start DateTime
+ hits Int
+}

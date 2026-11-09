@@ -1,5 +1,5 @@
 import "server-only";
-import { ApiError, serviceDb } from "@/lib/supabase/server";
+import { ApiError, serviceDb } from "@/server/local/client";
 import {
   evaluationSchema,
   speakingFeedbackSchema,

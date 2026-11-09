@@ -1,12 +1,15 @@
 # IELTS Academy
 
-The application is in [`ielts-academy/`](ielts-academy/README.md): Next.js, TypeScript, Supabase PostgreSQL/Auth/Storage and optional OpenAI evaluation.
+The Next.js frontend and backend live together in [`ielts-academy/`](ielts-academy/README.md). Local development uses SQLite with Prisma and optional OpenAI feedback. Supabase is not required.
 
-```sh
+Windows CMD:
+
+```bat
 cd ielts-academy
 npm ci
-# Configure .env.local and apply the Supabase migrations; see the application README.
+copy .env.example .env
+npm run db:setup
 npm run dev
 ```
 
-See [deployment](ielts-academy/docs/DEPLOYMENT.md), [architecture](ielts-academy/docs/ARCHITECTURE.md), [API workflows](ielts-academy/docs/API.md), and [verified checks and limitations](ielts-academy/docs/VERIFICATION.md). The active platform uses database-backed accounts and content rather than the original local demo.
+See the [application README](ielts-academy/README.md) for real account registration, first-admin setup, migrations and tests. SQLite data stays at `ielts-academy/db/academy.db`; private uploads and databases are excluded from Git. Historical Supabase migrations are retained for future migration work.

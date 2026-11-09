@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { userDb } from "@/lib/supabase/server";
+import { userDb } from "@/server/local/client";
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const db = await userDb();

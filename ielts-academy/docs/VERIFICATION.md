@@ -1,38 +1,23 @@
-# Implementation verification — 8 November 2026
+# SQLite verification
 
-## Executed successfully in this workspace
+The SQLite implementation was verified in the recovered cloud workspace on 2026-11-09 using Node 24 and Next.js 16.4.3. Frontend and backend remain together in this repository; the existing Supabase migrations are unchanged.
 
-| Check | Outcome |
+| Check | Result |
 |---|---|
-| Frozen dependency installation | `npm ci` succeeded using a writable cache; Supabase packages added with lockfile updates; `npm ls --depth=0` succeeds |
-| TypeScript | `npm run typecheck` passed |
-| ESLint | `npm run lint` passed without errors or warnings |
-| Unit/service tests | 19 passed: eight input/translation/upload tests, five mocked-provider AI boundary tests, six retained legacy grading regressions |
-| PostgreSQL integration | 19 passed, applying all five migrations to a disposable PostgreSQL 17 database |
-| Production build | `npm run build` passed (Next.js 16.4.3, webpack) |
-| Production server | Restarted with `npm start`; browser suite exercised this build |
-| Browser tests | 18 passed; includes four public-page axe scans, language switching, account form, same-origin rejection, anonymous API, onboarding save/resume/completion, empty/error states, 320/375/768/1440 px layouts, CMS draft/publish/unpublish, objective autosave/submission, writing recovery, and real browser microphone recording through signed-upload fixtures |
-| Visual inspection | Desktop and 375 px onboarding screenshots inspected |
-| Repository whitespace | `git diff --check` passed |
+| Clean dependencies | `npm ci --cache /workspace/.npm-cache` succeeded, including Prisma generation |
+| Development server | `npm run dev -- --port 3001` started and served the existing frontend |
+| Initialization | `npm run db:setup` initialized `db/academy.db`; repeated migrations preserved data |
+| TypeScript and lint | `npm run typecheck` and `npm run lint` passed |
+| Unit/integration tests | 39 passed: 20 real SQLite integration cases and 19 existing service/AI/legacy grading regressions |
+| Historical PostgreSQL cases | 19 skipped by default; these are retained for future Supabase migration work and are not counted as passes |
+| Production build | `npm run build` passed |
+| Existing browser regressions | 18 passed against the production server, including accessibility scans, language switching, responsive layouts, onboarding, CMS, objective work, writing and browser audio recording |
+| Real local browser/server smoke | `npm run test:local` passed all five workflow groups against an isolated production server and temporary SQLite database, without mocked API responses |
 
-The database suite checks zero initial educational content, RLS on every public table, safe role provisioning, escalation denial, onboarding validation/idempotency/isolation, publication/key protection, attempt resume/marking/deadlines/ownership, immutable used tests, assigned-teacher review, consent/quota enforcement, first-admin restrictions, final-admin retention, writing retry idempotency, mock publication/access, four-skill mock completion/teacher-scored overall band, and private recording ownership.
+The real smoke scenario registers through the existing UI, checks HttpOnly/SameSite cookies, completes and resumes onboarding, enrolls in a real course, saves lesson progress, autosaves and grades an objective attempt, submits Writing, and uploads/reads protected Speaking audio. It verifies Student/Admin authorization and that only an assigned Teacher can access a student's audio. After stopping and restarting the production server, it checks the same session, onboarding answers, progress, grades, writing body and private recording. Browser logout and login work afterward with no JavaScript errors.
 
-The normal unit command skips the database suite unless `RUN_DB_TESTS=1`; it was **separately executed** by `npm run test:db`. Skipped default DB cases are not counted as unit passes. Provider tests stub external OpenAI responses. Authenticated browser tests use isolated API fixtures; real SQL/RLS execution is covered separately, not by a hosted Supabase session.
+SQLite integration cases additionally exercise duplicate registration, bad credentials, expired/revoked sessions, password-change revocation, CSRF, privilege escalation rejection, another student's data isolation, last-admin protection, path traversal denial, immutable used content, deadline enforcement, private answer keys, course prerequisites, authorized teacher evaluation and a completed four-skill mock. All test accounts/content exist only in disposable test databases. The development database contains no sample users or results.
 
-## Not verified live
+External OpenAI calls are not verified live. AI is optional, disabled initially, and explicit about missing configuration. Local registration does not send confirmation emails; email recovery returns `password_recovery_unavailable` until an email provider/token flow is implemented. No fake email delivery or grading results are substituted.
 
-No hosted Supabase URL/keys or OpenAI key were available in environment bindings or the process. No production migrations were applied, no production user was created, no real email was sent, and no remote deployment was made.
-
-A full local Supabase stack was attempted. The default ECR image destination was denied; the official CLI's documented Docker Hub registry override was then used. Docker layer extraction failed with `no space left on device`. That attempt was stopped; the smaller standalone PostgreSQL test database remains working. The CLI release binary was downloaded from the official GitHub release and SHA-256 checked against its published checksum before execution. TLS and package integrity verification were preserved.
-
-Before production acceptance, use a staging Supabase project to verify actual signup/email confirmation/recovery, cookies and session refresh, role redirects, Storage CORS/signed direct upload/read/finalization, authorized private recording playback, and consented OpenAI transcription/evaluation. Review model availability, function timeouts, provider billing limits, and retention rules. Follow DEPLOYMENT.md.
-
-## Current limits
-
-- No XP/streak widget is exposed; no fake values or automatic learning milestones are awarded. Only completed onboarding receives its one idempotent badge.
-- Lesson completion is an authenticated explicit learner action, not a guarantee of video watch time.
-- AI feedback is estimated. Transcript-only speaking feedback intentionally supplies no pronunciation or speaking-band score; a teacher must evaluate audio.
-- Full-length mocks require administrators to author and order both Writing tasks and all three Speaking parts with suitable timings; shorter practice configurations are also supported. The automated end-to-end SQL mock scenario uses one isolated task per skill; the additional multi-task configuration has not been exercised with hosted services.
-- Learner catalogs and admin content/users have page controls. Histories and teacher lists are currently bounded to 100; expand those operational lists for larger deployments (see deployment guide).
-- Legacy demo source remains for reference but is not imported by the active platform or used to seed the database.
-- The verification above was recorded before Git publication. Consult the repository history for subsequent commits; no deployment or environment publication was performed.
+This is a persistent single-server SQLite configuration. Deployment to ephemeral serverless filesystems is not supported. Windows CMD instructions are provided, but this validation ran on Linux; a Windows machine was not available. Historical Supabase RLS/provider checks from the previous implementation do not establish current runtime behavior and are not prerequisites for local SQLite use.

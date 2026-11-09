@@ -5,7 +5,7 @@ const state = vi.hoisted(() => ({
   updates: [] as Record<string, unknown>[],
 }));
 vi.mock("server-only", () => ({}));
-vi.mock("@/lib/supabase/server", () => ({
+vi.mock("@/server/local/client", () => ({
   ApiError: class extends Error {
     constructor(
       public status: number,

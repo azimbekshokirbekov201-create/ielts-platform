@@ -118,6 +118,11 @@ const messages = {
   draft: ["Draft", "Qoralama", "Черновик"],
   published: ["Published", "Nashr etilgan", "Опубликовано"],
   archived: ["Archived", "Arxivlangan", "В архиве"],
+  password_recovery_unavailable: [
+    "Email recovery is not configured for this local installation.",
+    "Bu mahalliy o‘rnatishda email orqali tiklash sozlanmagan.",
+    "Восстановление по почте не настроено для локальной установки.",
+  ],
   configuration_required: [
     "Connect Supabase in environment settings to enable accounts and learning data.",
     "Hisoblar va ta’lim ma’lumotlari uchun muhit sozlamalarida Supabase’ni ulang.",

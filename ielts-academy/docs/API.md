@@ -1,6 +1,6 @@
 # API and authorization
 
-All routes live under `/api`. Success is `{data: ...}`; failures are `{error: stable_code}` without private database or provider errors. Every non-public route verifies the Supabase user server-side. All mutations require a matching Origin header and use a shared per-user rate limit. Auth uses a separate ingress-IP hash limit. Database policies protect direct SDK access as well.
+All routes live under `/api`. Success is `{data: ...}`; failures are `{error: stable_code}` without private database or provider errors. Every non-public route verifies the opaque SQLite-backed session server-side. All mutations require a matching Origin header and use a shared per-user rate limit. Auth uses a separate ingress-IP hash limit. The local database and filesystem are private to the server.
 
 | Endpoint | Method | Behavior |
 |---|---|---|
@@ -15,7 +15,7 @@ All routes live under `/api`. Success is `{data: ...}`; failures are `{error: st
 | `/attempts/:id` | GET/PATCH | Resume answers, or autosave `{answers:{question_uuid:answer}}` |
 | `/attempts/:id/submit` | POST | Locked, idempotent server marking |
 | `/writing` | POST | `{task_id,submission_id?,body?,finish?}`; send returned submission ID for every retry/save |
-| `/media-upload`, `/media-finalize`, `/media-url` | POST | Authorized direct upload, signature validation/metadata finalization, five-minute signed read URL. `/media` also supports small multipart uploads. |
+| `/media-upload`, `/media-finalize`, `/media-url` | POST | Authorized direct upload, signature validation/metadata finalization, session-authenticated local read URL. `/media` also supports small multipart uploads. |
 | `/speaking` | POST | Attach owned upload `{task_id,path}`; private recording and activity |
 | `/enroll`, `/complete` | POST | Enroll in course or record authenticated lesson completion |
 | `/dashboard`, `/submissions`, `/mock-results` | GET | Genuine authorized activity, evaluations and mock aggregates |
@@ -30,4 +30,6 @@ All routes live under `/api`. Success is `{data: ...}`; failures are `{error: st
 | `/admin/roles`, `/admin/assign-teacher` | POST | Admin-only role grants/revocations or teacher/student relationship |
 | `/admin/settings` | GET/PATCH | Enable AI and configure global/per-user daily caps |
 
-The Zod schemas in `src/server/validation.ts` define CMS payloads. PostgreSQL is authoritative for foreign keys, ownership, deadlines, scoring, publication, role changes, quotas and idempotency. Private answer keys have no student read policy, even after submission. Review reveals scores and feedback, not a public key dump.
+The Zod schemas in `src/server/validation.ts` define CMS payloads. Transactional SQLite services enforce parent references, ownership, deadlines, scoring, publication, role changes, quotas and idempotency. Private answer keys have no student read access, even after submission. Review reveals scores and feedback, not a public key dump.
+
+Local `/auth/register` starts a session immediately. `/auth/forgot` returns 503 `password_recovery_unavailable` because no local email provider is configured. `/auth/reset` requires a valid session and revokes other sessions. `/api/local-media/:bucket/:owner/:file` supports authenticated PUT/GET; GET checks authorization each time.

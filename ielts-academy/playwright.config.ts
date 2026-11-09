@@ -11,7 +11,8 @@ export default defineConfig({
     headless: true,
     launchOptions: {
       executablePath:
-        process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || "/usr/bin/chromium",
+        process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE ||
+        (process.platform === "linux" ? "/usr/bin/chromium" : undefined),
       args: [
         "--no-sandbox",
         "--use-fake-ui-for-media-stream",

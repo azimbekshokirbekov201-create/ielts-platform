@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
-import { ApiError, serviceDb, userDb } from "@/lib/supabase/server";
+import { ApiError, serviceDb, userDb } from "@/server/local/client";
 import {
   contentSchemas,
   onboardingSchema,

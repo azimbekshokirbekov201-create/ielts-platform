@@ -6,3 +6,10 @@ out/
 *.tsbuildinfo
 test-results/
 playwright-report/
+
+# Local databases and private media
+*.db
+*.db-*
+*.sqlite
+*.sqlite-*
+private-uploads/

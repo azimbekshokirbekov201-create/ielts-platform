@@ -1,63 +1,79 @@
 # IELTS Academy
 
-A database-backed IELTS learning platform using Next.js 16, React, TypeScript, Supabase PostgreSQL/Auth/Storage, and optional OpenAI feedback. The original Academy typography, colors and dark mode are retained. The active application no longer uses demo sessions, bundled sample questions, or fabricated dashboard metrics.
+The existing Next.js frontend and API backend run together in this repository, using **SQLite with Prisma ORM**. Local development needs no Supabase project, Docker, API keys, or OpenAI account. The original UI, languages, dark mode and learning screens are retained. Accounts, sessions, progress and results are real database records; no sample users or scores are substituted.
 
-## Development
+## Windows CMD setup
 
-Use Node 22+ (verified with Node 24). Work in this existing isolated checkout; do not create an additional worktree unless explicitly requested.
+Install Node.js **24 LTS** (minimum 22.13), then open CMD:
 
-```sh
+```bat
+cd ielts-academy
 npm ci
-cp .env.example .env.local
-# Set Supabase project URL, anon/publishable key and server service-role key securely.
+copy .env.example .env
+npm run db:setup
 npm run dev
 ```
 
-Use `npm ci --cache /workspace/.npm-cache` if the cloud user's home directory is read-only. Never disable TLS or integrity verification. Configure `APP_URL` to the exact origin used in your browser, including port; state-changing requests enforce same-origin protection. Sessions use HttpOnly, SameSite=Lax cookies, Secure in production. Browser code receives no service or AI key. Session refresh is handled on authenticated API requests.
+Open `http://localhost:3000`. Register your own account and complete onboarding. The database is `ielts-academy/db/academy.db`; restarting the server retains your data. Uploaded audio and course files live in `ielts-academy/private-uploads/`, outside the public directory. Both locations are ignored by Git.
 
-The app renders a configuration-required state when Supabase is absent. It does not substitute fake accounts or content. Authenticated students complete `/onboarding` before the dashboard. Admins and teachers are redirected by database roles, not a role chooser.
+On macOS/Linux, replace `copy .env.example .env` with `cp .env.example .env`. In a cloud environment with a read-only home, use `npm ci --cache /workspace/.npm-cache`.
 
-See [deployment and security](docs/DEPLOYMENT.md), [architecture](docs/ARCHITECTURE.md), and [API workflows](docs/API.md).
+Use `.env` for both setup scripts and Next.js. Remove obsolete Supabase values or conflicting `DATABASE_URL`/`APP_URL` overrides from `.env.local`. Set `APP_URL` to the exact browser origin and port; writes reject other origins. `DATABASE_URL` accepts a local `file:` path relative to this application directory. The supplied value stores the database at `db/academy.db`.
 
-## Local Supabase
+## First administrator and content
 
-Install the official Supabase CLI and Docker. Configuration is in `supabase/config.toml`; ports 54331–54334 keep it separate from the disposable PostgreSQL test database. No educational seed runs.
+Register a real account first, then run:
 
-```sh
-supabase start -x realtime,imgproxy,postgres-meta,studio,edge-runtime,logflare,vector,supavisor
-# If required, the CLI officially supports SUPABASE_INTERNAL_IMAGE_REGISTRY=docker.io.
-# Copy local URL/anon/service values securely into .env.local (do not paste them into chat).
-npm run dev
+```bat
+npm run db:admin -- your-email@example.com
 ```
 
-Local Auth configuration permits development signups; production must enable email confirmation, SMTP, CAPTCHA and appropriate rate limits. Never point test suites at production.
+This one-time command refuses to run once an administrator exists. Sign in normally. The Admin UI grants Teacher roles, assigns students to teachers, and manages course/test content. Every new registration receives only Student privileges. No shared administrator password exists.
+
+The initial catalog is empty. Create draft courses, modules, lessons, objective tests, questions and private answer keys, Writing/Speaking tasks, and mock exams in Admin. Every objective question needs an answer key before its test can be published. Teachers see only assigned students. Students can enroll, save progress, submit timed work, upload audio, and view their actual results.
+
+## Database migrations
+
+`npm run db:setup` applies versioned SQL from `prisma/migrations` transactionally, records checksums in `_academy_migrations`, and is safe to repeat. It creates only platform settings and the onboarding badge definition, never users or learning results. Do not edit an applied migration: add a new migration directory and SQL file, update `prisma/schema.prisma` if needed, then run:
+
+```bat
+npm run db:generate
+npm run db:setup
+```
+
+Prisma's JavaScript engine uses a local SQLite driver. Client generation uses the version-pinned Prisma WASM parser, avoiding the CLI's unrelated native migration-engine download. The migration runner uses Node's built-in SQLite driver. Use `db:setup` for this repository, not `prisma migrate deploy` (the migration ledgers differ).
+
+Historical PostgreSQL migrations and Supabase configuration remain in `supabase/` for a future migration. They are not run or required locally. They do not automatically import SQLite data or switch the application back to Supabase. See [architecture](docs/ARCHITECTURE.md).
 
 ## Validation
 
-```sh
+```bat
 npm run typecheck
 npm run lint
 npm test
+npm run test:db
 npm run build
+npm run test:local
 npm run test:e2e
 ```
 
-The PostgreSQL integration suite uses a **disposable `academy_test` database** in the local container `ielts-db`. It bootstraps Auth/Storage schema interfaces, applies every migration, and exercises genuine SQL/RLS/RPC behavior; it does not emulate a live hosted Auth service.
+The SQLite integration suite creates a temporary database, applies actual migrations, exercises real API handlers with database-backed sessions, and tests auth, role isolation, persistence, grading and media access. `npm run test:local` exercises actual registration, onboarding, courses, grading, Writing and Speaking persistence, role-restricted audio, logout/login and server restart through a real production server/browser with a temporary SQLite database. It never writes fixtures to the development database. The separate browser regression suite exercises existing UI workflows with isolated API fixtures. For browser tests on Windows:
 
-```sh
-docker run -d --name ielts-db -e POSTGRES_HOST_AUTH_METHOD=trust \
-  -p 127.0.0.1:54322:5432 postgres:17-alpine
-npm run test:db
+```bat
+npx playwright install chromium
+npm run test:e2e
 ```
 
-This trust-only database is local test infrastructure, never a deployment configuration. Existing container contents are retained; the suite drops/recreates only `academy_test`. Browser tests use isolated API fixtures for authenticated UI workflows; their results do not establish hosted Supabase or OpenAI connectivity. The unit suite retains separately labeled legacy grading tests as regression checks for the unused original demo code.
+The historical PostgreSQL integration suite remains available for future migration work and skips unless `RUN_DB_TESTS=1` is set. It is not needed for SQLite development.
 
-## Application workflows
+## Authentication, media and optional AI
 
-- Admin: create draft courses, modules, lessons, tests, sections, passages, questions, options, private keys, Writing/Speaking tasks and mock exams; preview, edit, publish, unpublish, archive or delete where referential integrity allows. Manage roles and teacher/student relationships. Upload private media, view real counts, audit events and AI limits.
-- Student: register/verify, resume onboarding, enroll, complete published lessons, take timed objective practice with server marking, submit timed writing, record/upload speaking, complete sequential mock sections, review real results and consent to optional AI processing.
-- Teacher: access only assigned students, assign published content, review authorized writing/audio, and evaluate using separate writing/speaking rubrics. Teacher review supersedes AI estimates.
+Passwords use independently salted scrypt hashes. Seven-day opaque sessions are stored as SHA-256 hashes, delivered through HttpOnly/SameSite cookies, revoked on logout, and rotated on login or password change. Authorization is checked on the server for every operation; browser roles do not grant access. Use `SESSION_COOKIE_SECURE=true` for HTTPS deployments.
 
-Content is administrator-authored; interface language does not machine-translate examination text. The three interface dictionaries use stable keys. Only the onboarding badge is awarded automatically. XP and streak widgets are deliberately hidden; no learning activity is invented.
+Local registration logs in immediately and does not send email. The existing forgot-password UI returns an explicit unavailable message because no email recovery provider is configured; it never claims that an email was sent. Signed-in password changes work and revoke other sessions. Supabase email confirmation/callbacks are not used locally.
 
-Legacy frontend-only feature files and `src/data/content.ts` are retained for reference and are not imported by the active platform. Do not reconnect them as production data sources.
+Audio URLs require a live authorized session on every read; they are not public bearer links. Uploads have size/MIME/signature checks and are stored with private file permissions. Answer keys, password hashes and session tokens are never included in learner API responses.
+
+OpenAI is optional and disabled by default. Add `OPENAI_API_KEY` only on the server, enable AI in Admin settings, and obtain the learner's consent. Without a key, manual submissions, objective grading and teacher reviews still work. No fabricated feedback is generated. See [deployment and operations](docs/DEPLOYMENT.md) and [API workflows](docs/API.md).
+
+Use a persistent Node server for this SQLite configuration. Ephemeral serverless filesystems do not retain SQLite or uploads. Back up both before migration or deployment. Legacy demo components remain as reference sources and are not connected to the active platform.
