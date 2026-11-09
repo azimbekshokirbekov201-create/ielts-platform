@@ -11,6 +11,8 @@ import { type Language } from "@/lib/i18n";
 type Context = {
   me: Me | null;
   lang: Language;
+  theme: string;
+  setTheme: (value: "light" | "dark") => Promise<void>;
   setLang: (l: Language) => void;
   t: (k: string) => string;
   notify: (k: string) => void;

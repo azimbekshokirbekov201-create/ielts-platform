@@ -1,6 +1,9 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { LearningHeading, learningSkills } from "./premium-ui";
+import { ArrowUpRight, BookOpen, Clock } from "lucide-react";
+import { Badge } from "@/components/ui/primitives";
 import { api, type Row } from "@/lib/api";
 import { uploadMedia } from "@/lib/media-upload";
 import {
@@ -33,16 +36,52 @@ export function Catalog({
       {!r.data?.length ? (
         <Empty />
       ) : (
-        <div className="live-grid">
-          {r.data.map((row) => (
-            <article className="card" key={row.id}>
-              <h2>{row.title}</h2>
-              <p>{row.variant ? t(String(row.variant)) : ""}</p>
-              <button className="button primary" onClick={() => onSelect(row)}>
-                {t("start")}
-              </button>
-            </article>
-          ))}
+        <div className="premium-catalog">
+          {r.data.map((row) => {
+            const item = learningSkills.find(
+              (s) =>
+                s.id === (row.skill || skill || kind.replace("_tasks", "")),
+            );
+            const Icon = item?.icon || BookOpen;
+            return (
+              <article className="card test-selection-card" key={row.id}>
+                <div className={"test-cover " + (item?.color || "blue")}>
+                  <span>
+                    {item?.title || "All four skills."}
+                    <br />
+                    Your next chapter.
+                  </span>
+                  <i aria-hidden="true">
+                    <Icon size={54} />
+                  </i>
+                </div>
+                <div className="test-details">
+                  <Badge color={item?.color || "blue"}>
+                    {row.variant
+                      ? t(String(row.variant))
+                      : item?.title || "Mock exam"}
+                  </Badge>
+                  <h2>{row.title}</h2>
+                  <p>A focused step toward your next chapter.</p>
+                  {!!row.duration_seconds && (
+                    <div className="metadata">
+                      <span>
+                        <Clock size={15} />
+                        {Math.ceil(Number(row.duration_seconds) / 60)} min
+                      </span>
+                    </div>
+                  )}
+                  <button
+                    className="button outline"
+                    onClick={() => onSelect(row)}
+                  >
+                    {t("start")}
+                    <ArrowUpRight size={16} />
+                  </button>
+                </div>
+              </article>
+            );
+          })}
         </div>
       )}
       <PageControls
@@ -190,7 +229,7 @@ export function PracticeRoom({
   if (!test || !attempt)
     return (
       <>
-        <h1>{t(skill)}</h1>
+        <LearningHeading skill={skill} />
         {!initialId && (
           <Catalog
             kind="tests"
@@ -404,61 +443,69 @@ export function WritingRoom({
   if (!task || !draft)
     return (
       <>
-        <h1>{t("writing")}</h1>
+        <LearningHeading skill="writing" />
         {!initialId && (
           <Catalog kind="writing_tasks" onSelect={(row) => void open(row)} />
         )}
       </>
     );
   return (
-    <section className="card">
-      <h1>{task.title}</h1>
-      <p className="preserve-text">{String(task.prompt)}</p>
-      {!!task.image_path && (
-        <PrivateMedia path={String(task.image_path)} image />
-      )}
-      {!draft.submitted_at && (
-        <Timer
-          deadline={String(draft.deadline)}
-          onExpire={() => void submit()}
-        />
-      )}
-      <label className="field">
-        {t("answer")}
-        <textarea
-          className="input live-editor"
-          value={body}
-          maxLength={50000}
-          disabled={!!draft.submitted_at}
-          onChange={(e) => {
-            setBody(e.target.value);
-            latest.current = e.target.value;
-            edited.current = true;
-            setSaved("saving");
-          }}
-        />
-      </label>
-      <div className="live-actions">
-        <span>
-          {t("words")}: {body.trim() ? body.trim().split(/\s+/).length : 0}
-        </span>
-        <span role="status">{t(saved)}</span>
+    <div className="writing-workspace">
+      <section className="card writing-prompt">
+        <h1>{task.title}</h1>
+        <p className="preserve-text">{String(task.prompt)}</p>
+        {!!task.image_path && (
+          <PrivateMedia path={String(task.image_path)} image />
+        )}
         {!draft.submitted_at && (
-          <button
-            className="button primary"
-            disabled={busy || !body.trim()}
-            onClick={() => void submit()}
-          >
-            {t("submit")}
-          </button>
+          <Timer
+            deadline={String(draft.deadline)}
+            onExpire={() => void submit()}
+          />
         )}
-        {!!draft.submitted_at && (
-          <Link href="/progress" className="text-link">
-            {t("pending")} →
-          </Link>
-        )}
-      </div>
-    </section>
+      </section>
+      <section className="card editor-card">
+        <div className="editor-toolbar">
+          <strong>Your writing space</strong>
+          <span>Make room for your ideas.</span>
+        </div>
+        <label className="field">
+          {t("answer")}
+          <textarea
+            className="input live-editor rich-editor"
+            value={body}
+            maxLength={50000}
+            disabled={!!draft.submitted_at}
+            onChange={(e) => {
+              setBody(e.target.value);
+              latest.current = e.target.value;
+              edited.current = true;
+              setSaved("saving");
+            }}
+          />
+        </label>
+        <div className="live-actions">
+          <span>
+            {t("words")}: {body.trim() ? body.trim().split(/\s+/).length : 0}
+          </span>
+          <span role="status">{t(saved)}</span>
+          {!draft.submitted_at && (
+            <button
+              className="button primary"
+              disabled={busy || !body.trim()}
+              onClick={() => void submit()}
+            >
+              {t("submit")}
+            </button>
+          )}
+          {!!draft.submitted_at && (
+            <Link href="/progress" className="text-link">
+              {t("pending")} →
+            </Link>
+          )}
+        </div>
+      </section>
+    </div>
   );
 }
 export function SpeakingRoom({
@@ -539,75 +586,84 @@ export function SpeakingRoom({
   if (!task)
     return (
       <>
-        <h1>{t("speaking")}</h1>
+        <LearningHeading skill="speaking" />
         {!initialId && <Catalog kind="speaking_tasks" onSelect={setTask} />}
       </>
     );
   return (
-    <article className="card">
-      <h1>{task.title}</h1>
-      <p>
-        {t("part")} {String(task.part)}
-      </p>
-      <p className="preserve-text">{String(task.prompt)}</p>
-      <p>
-        {t("preparation_seconds")}: {String(task.preparation_seconds)} ·{" "}
-        {t("response_seconds")}: {String(task.response_seconds)}
-      </p>
-      {preparing && (
-        <Timer
-          deadline={preparing}
-          onExpire={() => {
-            setPreparing("");
-            void record();
-          }}
-        />
-      )}
-      {recording ? (
-        <button className="button destructive" onClick={stop}>
-          {t("stop")}
-        </button>
-      ) : (
-        <button
-          className="button outline"
-          disabled={busy || !!preparing}
-          onClick={() =>
-            Number(task.preparation_seconds) > 0
-              ? setPreparing(
-                  new Date(
-                    Date.now() + Number(task.preparation_seconds) * 1000,
-                  ).toISOString(),
-                )
-              : void record()
-          }
-        >
-          {t("record")}
-        </button>
-      )}
-      {url && <audio src={url} controls />}
-      {blob && (
-        <button
-          className="button primary"
-          disabled={busy || recording}
-          onClick={() => {
-            setBusy(true);
-            void run(async () => {
-              const upload = await uploadMedia(blob, "speaking");
-              const row = await api<Row>("speaking", "POST", {
-                task_id: task.id,
-                path: upload.path,
-              });
-              notify("saved");
-              setBlob(null);
-              setUrl("");
-              onComplete?.(row.id);
-            }).finally(() => setBusy(false));
-          }}
-        >
-          {t("submit")}
-        </button>
-      )}
-    </article>
+    <div className="speaking-layout">
+      <article className="card cue-card">
+        <h1>{task.title}</h1>
+        <p>
+          {t("part")} {String(task.part)}
+        </p>
+        <p className="preserve-text">{String(task.prompt)}</p>
+        <p>
+          {t("preparation_seconds")}: {String(task.preparation_seconds)} ·{" "}
+          {t("response_seconds")}: {String(task.response_seconds)}
+        </p>
+      </article>
+      <article className="card recording-card">
+        <div className="recording-orbit" aria-hidden="true">
+          ◉
+        </div>
+        <h2>Your voice. Your pace.</h2>
+        <p>Take a breath. Share your ideas.</p>
+        {preparing && (
+          <Timer
+            deadline={preparing}
+            onExpire={() => {
+              setPreparing("");
+              void record();
+            }}
+          />
+        )}
+        {recording ? (
+          <button className="button destructive" onClick={stop}>
+            {t("stop")}
+          </button>
+        ) : (
+          <button
+            className="button outline"
+            disabled={busy || !!preparing}
+            onClick={() =>
+              Number(task.preparation_seconds) > 0
+                ? setPreparing(
+                    new Date(
+                      Date.now() + Number(task.preparation_seconds) * 1000,
+                    ).toISOString(),
+                  )
+                : void record()
+            }
+          >
+            {t("record")}
+          </button>
+        )}
+        {url && <audio src={url} controls />}
+        {blob && (
+          <button
+            className="button primary"
+            disabled={busy || recording}
+            onClick={() => {
+              setBusy(true);
+              void run(async () => {
+                const upload = await uploadMedia(blob, "speaking");
+                const row = await api<Row>("speaking", "POST", {
+                  task_id: task.id,
+                  path: upload.path,
+                });
+                notify("saved");
+                setBlob(null);
+                setUrl("");
+                onComplete?.(row.id);
+              }).finally(() => setBusy(false));
+            }}
+          >
+            {t("submit")}
+          </button>
+        )}
+      </article>
+    </div>
   );
 }
 export function MockRoom() {
@@ -645,7 +701,7 @@ export function MockRoom() {
   if (!exam || !attempt)
     return (
       <>
-        <h1>{t("mock")}</h1>
+        <LearningHeading skill="mock" />
         <Catalog kind="mock_exams" onSelect={(r) => void start(r)} />
       </>
     );

@@ -1,4 +1,5 @@
 "use client";
+import { BookOpen } from "lucide-react";
 import {
   ResponsiveContainer,
   LineChart,
@@ -10,13 +11,26 @@ import {
   BarChart,
   Bar,
 } from "recharts";
-import { trend } from "@/data/content";
-export function SkillProgressChart({ compact = false }: { compact?: boolean }) {
+
+export function SkillProgressChart({
+  compact = false,
+  data = [],
+}: {
+  compact?: boolean;
+  data?: Record<string, string | number>[];
+}) {
+  if (!data.length)
+    return (
+      <div className="chart-empty">
+        <BookOpen size={28} />
+        <p>Your graded practice will appear here.</p>
+      </div>
+    );
   return (
     <div
       className="chart"
       role="img"
-      aria-label="Illustrative six-week band trends. Listening 5.5 to 7.5, Reading 5 to 7, Writing 5 to 6.5, Speaking 5.5 to 7."
+      aria-label="Saved practice band scores over time"
     >
       <ResponsiveContainer
         width="100%"
@@ -24,7 +38,7 @@ export function SkillProgressChart({ compact = false }: { compact?: boolean }) {
         minWidth={0}
       >
         <LineChart
-          data={trend}
+          data={data}
           margin={{ top: 15, right: 12, left: -25, bottom: 0 }}
         >
           <CartesianGrid
@@ -40,7 +54,7 @@ export function SkillProgressChart({ compact = false }: { compact?: boolean }) {
             dy={10}
           />
           <YAxis
-            domain={[4, 9]}
+            domain={[0, 9]}
             ticks={[4, 5, 6, 7, 8, 9]}
             axisLine={false}
             tickLine={false}
@@ -61,7 +75,8 @@ export function SkillProgressChart({ compact = false }: { compact?: boolean }) {
               type="monotone"
               stroke={["#2563eb", "#9374ed", "#eea05b", "#43a68e"][i]}
               strokeWidth={2.5}
-              dot={false}
+              dot={{ r: 3 }}
+              connectNulls
               activeDot={{ r: 5 }}
             />
           ))}
@@ -70,25 +85,15 @@ export function SkillProgressChart({ compact = false }: { compact?: boolean }) {
     </div>
   );
 }
-export function ActivityChart() {
+export function ActivityChart({
+  data = [],
+}: {
+  data?: { day: string; minutes: number }[];
+}) {
   return (
-    <div
-      className="chart"
-      role="img"
-      aria-label="Sample practice minutes: Monday 35, Tuesday 50, Wednesday 25, Thursday 65, Friday 42, Saturday 0, Sunday 0"
-    >
+    <div className="chart" role="img" aria-label="Recorded learning activity">
       <ResponsiveContainer width="100%" height={180} minWidth={0}>
-        <BarChart
-          data={[
-            { day: "M", minutes: 35 },
-            { day: "T", minutes: 50 },
-            { day: "W", minutes: 25 },
-            { day: "T ", minutes: 65 },
-            { day: "F", minutes: 42 },
-            { day: "S", minutes: 0 },
-            { day: "S ", minutes: 0 },
-          ]}
-        >
+        <BarChart data={data}>
           <CartesianGrid
             vertical={false}
             strokeDasharray="4 4"

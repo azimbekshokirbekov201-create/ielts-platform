@@ -1,20 +1,10 @@
 "use client";
 import Link from "next/link";
+import { Eye, EyeOff } from "lucide-react";
+import { SkillProgressChart } from "@/components/charts/skill-chart";
+import { learningScores } from "./premium-ui";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
-import {
-  BookOpen,
-  Headphones,
-  Mic,
-  PenLine,
-  LayoutDashboard,
-  GraduationCap,
-  Settings,
-  ClipboardList,
-  ArrowRight,
-  Sun,
-  Moon,
-} from "lucide-react";
 import { api, RequestError, type Me, type Row } from "@/lib/api";
 import { translate, type Language } from "@/lib/i18n";
 import {
@@ -23,40 +13,14 @@ import {
   useResource,
   ResourceState,
   Empty,
-  PageControls,
 } from "./academy-context";
-import { Onboarding } from "./onboarding";
-import { ContentStudio, TeacherWorkspace } from "./content-studio";
-import {
-  PracticeRoom,
-  WritingRoom,
-  SpeakingRoom,
-  MockRoom,
-} from "./learning-rooms";
-const nav = [
-  ["dashboard", "/dashboard", LayoutDashboard],
-  ["listening", "/practice/listening", Headphones],
-  ["reading", "/practice/reading", BookOpen],
-  ["writing", "/practice/writing", PenLine],
-  ["speaking", "/practice/speaking", Mic],
-  ["mock", "/mock-exams", ClipboardList],
-  ["courses", "/courses", GraduationCap],
-  ["progress", "/progress", BookOpen],
-  ["settings", "/settings", Settings],
-] as const;
-export function Brand() {
-  return (
-    <Link href="/" className="brand">
-      <span className="brand-icon">
-        <BookOpen size={23} />
-      </span>
-      <span>
-        IELTS<span className="brand-light"> Academy</span>
-      </span>
-    </Link>
-  );
-}
-export function Academy({ route }: { route: string }) {
+export function AcademyProvider({
+  route,
+  children,
+}: {
+  route: string;
+  children: React.ReactNode;
+}) {
   const router = useRouter();
   const [me, setMe] = useState<Me | null>(null),
     [lang, setLanguage] = useState<Language>("en"),
@@ -134,148 +98,32 @@ export function Academy({ route }: { route: string }) {
     },
     [],
   );
-  const language = (
-    <label className="language-control">
-      <span>{t("language")}</span>
-      <select
-        aria-label={t("language")}
-        className="input"
-        value={lang}
-        onChange={(e) => void setLang(e.target.value as Language)}
-      >
-        <option value="en">English</option>
-        <option value="uz">O‘zbekcha</option>
-        <option value="ru">Русский</option>
-      </select>
-    </label>
-  );
+  async function saveTheme(value: "light" | "dark") {
+    await run(async () => {
+      if (me) await api("preferences", "PATCH", { theme: value });
+      setTheme(value);
+    });
+  }
   return (
     <AcademyContext.Provider
-      value={{ me, lang, setLang, t, notify: setNotice, refresh, run }}
+      value={{
+        me,
+        lang,
+        setLang,
+        theme,
+        setTheme: saveTheme,
+        t,
+        notify: setNotice,
+        refresh,
+        run,
+      }}
     >
       {publicRoute ? (
-        <>
-          <header className="live-public-header">
-            <Brand />
-            {language}
-            <Link
-              className="button outline"
-              href={me ? me.destination : "/login"}
-            >
-              {t(me ? "dashboard" : "login")}
-            </Link>
-          </header>
-          {route === "/" ? (
-            <main className="live-landing">
-              <span className="hero-kicker">IELTS ACADEMY</span>
-              <h1>{t("welcome")}</h1>
-              <p>{t("subtitle")}</p>
-              <Link href="/register" className="button primary">
-                {t("register")}
-                <ArrowRight size={18} />
-              </Link>
-              <div className="live-grid">
-                {nav.slice(1, 5).map(([key, , Icon]) => (
-                  <div className="card" key={key}>
-                    <Icon />
-                    <h2>{t(key)}</h2>
-                  </div>
-                ))}
-              </div>
-            </main>
-          ) : (
-            <AccountForm route={route} />
-          )}
-        </>
+        children
       ) : (
-        <div className="live-shell">
-          <aside className="live-sidebar">
-            <Brand />
-            <nav aria-label={t("dashboard")}>
-              {nav.map(([key, path, Icon]) => (
-                <Link
-                  aria-current={route === path ? "page" : undefined}
-                  className={route === path ? "active" : ""}
-                  key={path}
-                  href={path}
-                >
-                  <Icon size={18} />
-                  {t(key)}
-                </Link>
-              ))}
-              {me?.roles.includes("ADMIN") && (
-                <Link href="/admin">{t("admin")}</Link>
-              )}
-              {me?.roles.some((x) => ["ADMIN", "TEACHER"].includes(x)) && (
-                <Link href="/teacher">{t("teacher")}</Link>
-              )}
-            </nav>
-            <button
-              className="button outline"
-              onClick={() =>
-                void run(async () => {
-                  await api("auth/logout", "POST", {});
-                  setMe(null);
-                  router.replace("/login");
-                })
-              }
-            >
-              {t("logout")}
-            </button>
-          </aside>
-          <div className="live-body">
-            <header className="live-topbar">
-              <span>{me?.profile.display_name}</span>
-              {language}
-              <button
-                className="icon-button"
-                aria-label={t("theme")}
-                onClick={() =>
-                  void run(async () => {
-                    const value = theme === "dark" ? "light" : "dark";
-                    await api("preferences", "PATCH", { theme: value });
-                    setTheme(value);
-                  })
-                }
-              >
-                {theme === "dark" ? <Sun size={20} /> : <Moon size={20} />}
-              </button>
-            </header>
-            <main id="main" className="live-main">
-              <ResourceState loading={loading} error={!me ? error : ""}>
-                {me &&
-                  (route === "/onboarding" ? (
-                    <Onboarding />
-                  ) : route === "/admin" ? (
-                    me.roles.includes("ADMIN") && <ContentStudio />
-                  ) : route === "/teacher" ? (
-                    <TeacherWorkspace />
-                  ) : route === "/courses" ? (
-                    <CourseCatalog />
-                  ) : route === "/progress" ? (
-                    <Results />
-                  ) : route === "/settings" ? (
-                    <Preferences />
-                  ) : route === "/practice/listening" ||
-                    route === "/practice/reading" ? (
-                    <PracticeRoom
-                      skill={
-                        route.endsWith("reading") ? "reading" : "listening"
-                      }
-                    />
-                  ) : route === "/practice/writing" ? (
-                    <WritingRoom />
-                  ) : route === "/practice/speaking" ? (
-                    <SpeakingRoom />
-                  ) : route === "/mock-exams" ? (
-                    <MockRoom />
-                  ) : (
-                    <Dashboard />
-                  ))}
-              </ResourceState>
-            </main>
-          </div>
-        </div>
+        <ResourceState loading={loading} error={!me ? error : ""}>
+          {me && children}
+        </ResourceState>
       )}
       {notice && (
         <div
@@ -291,10 +139,11 @@ export function Academy({ route }: { route: string }) {
     </AcademyContext.Provider>
   );
 }
-function AccountForm({ route }: { route: string }) {
+export function AccountForm({ route }: { route: string }) {
   const { t, run, refresh, notify } = useApp();
   const router = useRouter();
   const [busy, setBusy] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
   const [done, setDone] = useState(false);
   const register = route === "/register",
     forgot = route === "/forgot-password",
@@ -307,7 +156,7 @@ function AccountForm({ route }: { route: string }) {
         ? "reset"
         : "login";
   return (
-    <main className="live-account card">
+    <div className="premium-account">
       <span className="hero-kicker">IELTS ACADEMY</span>
       <h1>{t(register ? "register" : forgot || reset ? "reset" : "login")}</h1>
       {done ? (
@@ -361,19 +210,30 @@ function AccountForm({ route }: { route: string }) {
             </label>
           )}
           {!forgot && (
-            <label className="field">
+            <label className="field" htmlFor="account-password">
               {t("password")}
-              <input
-                className="input"
-                name="password"
-                type="password"
-                minLength={12}
-                maxLength={128}
-                autoComplete={
-                  register || reset ? "new-password" : "current-password"
-                }
-                required
-              />
+              <div className="password-field">
+                <input
+                  className="input"
+                  name="password"
+                  id="account-password"
+                  type={showPassword ? "text" : "password"}
+                  minLength={12}
+                  maxLength={128}
+                  autoComplete={
+                    register || reset ? "new-password" : "current-password"
+                  }
+                  required
+                />
+                <button
+                  type="button"
+                  className="icon-button"
+                  aria-label={showPassword ? "Hide password" : "Show password"}
+                  onClick={() => setShowPassword(!showPassword)}
+                >
+                  {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+              </div>
             </label>
           )}
           <button disabled={busy} className="button primary">
@@ -394,156 +254,7 @@ function AccountForm({ route }: { route: string }) {
         <Link href="/register">{t("register")}</Link>
         <Link href="/forgot-password">{t("forgot")}</Link>
       </div>
-    </main>
-  );
-}
-function Dashboard() {
-  const { t } = useApp();
-  const r = useResource<Record<string, Row[]>>("dashboard");
-  return (
-    <>
-      <h1>{t("dashboard")}</h1>
-      <LearningProfile />
-      <ResourceState {...r}>
-        <div className="live-grid">
-          {[
-            "test_attempts",
-            "lesson_progress",
-            "learning_activity_events",
-            "student_achievements",
-          ].map((k, i) => (
-            <div className="card" key={k}>
-              <span>
-                {t(["attempts", "lessons", "activity", "achievements"][i])}
-              </span>
-              <h2>{r.data?.[k].length || 0}</h2>
-            </div>
-          ))}
-        </div>
-        <h2>{t("assignments")}</h2>
-        {!r.data?.assignments.length ? (
-          <Empty />
-        ) : (
-          r.data.assignments.map((row) => (
-            <div className="card" key={row.id}>
-              <h3>{row.title}</h3>
-              <p>{String(row.due_date || "")}</p>
-              <Link
-                className="button outline"
-                href={
-                  row.test_id
-                    ? "/practice/" +
-                      String((row.tests as Row)?.skill || "reading")
-                    : row.writing_task_id
-                      ? "/practice/writing"
-                      : row.speaking_task_id
-                        ? "/practice/speaking"
-                        : "/courses"
-                }
-              >
-                {t("start")}
-              </Link>
-            </div>
-          ))
-        )}
-      </ResourceState>
-    </>
-  );
-}
-function CourseCatalog() {
-  const { t, run, notify } = useApp();
-  const [page, setPage] = useState(0);
-  const r = useResource<Row[]>(
-    "catalog/courses" + (page ? "?page=" + page : ""),
-  );
-  const [selected, setSelected] = useState<Row | null>(null);
-  return (
-    <>
-      <h1>{t("courses")}</h1>
-      <ResourceState {...r}>
-        {!r.data?.length ? (
-          <Empty />
-        ) : (
-          <div className="live-grid">
-            {r.data.map((c) => (
-              <article className="card" key={c.id}>
-                <h2>{c.title}</h2>
-                <p>{String(c.description)}</p>
-                <div className="live-actions">
-                  <button
-                    className="button outline"
-                    onClick={() =>
-                      void run(async () => {
-                        setSelected(await api<Row>("course/" + c.id));
-                      })
-                    }
-                  >
-                    {t("preview")}
-                  </button>
-                  <button
-                    className="button primary"
-                    onClick={() =>
-                      void run(async () => {
-                        await api("enroll", "POST", { course_id: c.id });
-                        notify("saved");
-                      })
-                    }
-                  >
-                    {t("enroll")}
-                  </button>
-                </div>
-              </article>
-            ))}
-          </div>
-        )}
-        <PageControls
-          page={page}
-          onChange={setPage}
-          count={r.data?.length || 0}
-        />
-      </ResourceState>
-      {selected && (
-        <section>
-          <h2>{selected.title}</h2>
-          {(selected.course_modules as Row[])
-            .sort((a, b) => Number(a.position) - Number(b.position))
-            .map((m) => (
-              <section key={m.id}>
-                <h3>{m.title}</h3>
-                {(m.lessons as Row[])
-                  .sort((a, b) => Number(a.position) - Number(b.position))
-                  .map((l) => (
-                    <article className="card" key={l.id}>
-                      <h3>{l.title}</h3>
-                      <p className="preserve-text">{String(l.body)}</p>
-                      {!!l.video_url && (
-                        <PrivateMedia path={String(l.video_url)} video />
-                      )}
-                      {((l.lesson_resources as Row[]) || []).map((a) => (
-                        <PrivateMedia
-                          key={a.id}
-                          path={String(a.storage_path)}
-                          label={a.title}
-                        />
-                      ))}
-                      <button
-                        className="button primary"
-                        onClick={() =>
-                          void run(async () => {
-                            await api("complete", "POST", { lesson_id: l.id });
-                            notify("saved");
-                          })
-                        }
-                      >
-                        {t("complete")}
-                      </button>
-                    </article>
-                  ))}
-              </section>
-            ))}
-        </section>
-      )}
-    </>
+    </div>
   );
 }
 export function PrivateMedia({
@@ -632,9 +343,63 @@ export function Results() {
   const attempts = useResource<Row[]>("attempts"),
     subs = useResource<{ writing: Row[]; speaking: Row[] }>("submissions"),
     mocks = useResource<Row[]>("mock-results");
+  const scores = learningScores(
+    attempts.data || [],
+    subs.data || { writing: [], speaking: [] },
+  );
   return (
     <>
       <h1>{t("progress")}</h1>
+      <ResourceState
+        loading={attempts.loading || subs.loading || mocks.loading}
+        error={attempts.error || subs.error || mocks.error}
+      >
+        <div className="summary-grid premium-progress-summary">
+          <section className="card">
+            <div className="summary-label">Objective practice completed</div>
+            <div className="summary-number">
+              {attempts.data?.filter((a) => a.status === "submitted").length ||
+                0}
+            </div>
+            <p>Reading and Listening</p>
+          </section>
+          <section className="card">
+            <div className="summary-label">Writing submitted</div>
+            <div className="summary-number">
+              {subs.data?.writing.filter((a) => a.submitted_at).length || 0}
+            </div>
+            <p>Your saved responses</p>
+          </section>
+          <section className="card">
+            <div className="summary-label">Speaking recordings</div>
+            <div className="summary-number">
+              {subs.data?.speaking.length || 0}
+            </div>
+            <p>Your private recordings</p>
+          </section>
+          <section className="card">
+            <div className="summary-label">Mock exams completed</div>
+            <div className="summary-number">
+              {mocks.data?.filter((a) => a.submitted_at).length || 0}
+            </div>
+            <p>All sections submitted</p>
+          </section>
+        </div>
+        <section className="card chart-card">
+          <div className="section-heading">
+            <div>
+              <h3>Your progress, reflected.</h3>
+              <p>Every saved grade is another step forward.</p>
+            </div>
+          </div>
+          <SkillProgressChart
+            data={scores.map((s) => ({
+              week: new Date(s.date).toLocaleDateString(),
+              [s.skill[0].toUpperCase() + s.skill.slice(1)]: s.band,
+            }))}
+          />
+        </section>
+      </ResourceState>
       <ResourceState {...attempts}>
         {!attempts.data?.length ? (
           <Empty />
@@ -751,11 +516,15 @@ export function Results() {
     </>
   );
 }
-function Preferences() {
+export function Preferences({
+  hideHeading = false,
+}: {
+  hideHeading?: boolean;
+}) {
   const { me, t, run, refresh, notify } = useApp();
   return (
     <>
-      <h1>{t("settings")}</h1>
+      {!hideHeading && <h1>{t("settings")}</h1>}
       <div className="card">
         <form
           className="form-stack"
@@ -808,7 +577,7 @@ function Preferences() {
   );
 }
 
-function LearningProfile() {
+export function LearningProfile() {
   const { me, t } = useApp();
   return me?.onboarding ? (
     <div className="card">

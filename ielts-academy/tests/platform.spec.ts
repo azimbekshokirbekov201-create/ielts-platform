@@ -2,15 +2,15 @@ import { test, expect } from "@playwright/test";
 test("public landing, languages and secure account form", async ({ page }) => {
   await page.goto("/");
   await expect(
-    page.getByRole("heading", { name: "Welcome to IELTS Academy!" }),
+    page.getByRole("heading", { name: /Your ambition/ }),
   ).toBeVisible();
   await page.getByRole("combobox", { name: "Language" }).selectOption("uz");
   await expect(
-    page.getByRole("heading", { name: "IELTS Academy’ga xush kelibsiz!" }),
+    page.getByRole("heading", { name: /Sizning maqsadingiz/ }),
   ).toBeVisible();
   await page.getByRole("combobox", { name: "Til" }).selectOption("ru");
   await expect(
-    page.getByRole("heading", { name: "Добро пожаловать в IELTS Academy!" }),
+    page.getByRole("heading", { name: /Ваши амбиции/ }),
   ).toBeVisible();
   await page.goto("/login");
   await expect(page.getByRole("heading", { name: "Log in" })).toBeVisible();
@@ -447,7 +447,7 @@ test("speaking records real browser audio and uses the signed-upload workflow", 
   ).toBeVisible();
   expect(uploaded).toBe(true);
   expect(attached).toBe(true);
-  await page.getByRole("link", { name: "Results", exact: true }).click();
+  await page.locator('.sidebar a[href="/progress"]').click();
   await expect(
     page.getByRole("heading", { name: "Results", exact: true }),
   ).toBeVisible();

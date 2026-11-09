@@ -8335,3 +8335,204 @@ td:last-child {
     scroll-behavior: auto !important;
   }
 }
+
+/* Original premium compositions, connected to the live Academy API. */
+.premium-account > .hero-kicker {
+  display: none;
+}
+.premium-account h1 {
+  margin: 22px 0 12px;
+}
+.premium-account .form-stack {
+  margin-top: 26px;
+}
+.premium-account > .live-actions {
+  font-size: 12px;
+  justify-content: space-between;
+  margin-top: 24px;
+}
+.auth-form-wrap > .language-button {
+  margin-bottom: 12px;
+  max-width: 160px;
+}
+.premium-catalog {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 24px;
+}
+.premium-learning > h1,
+.premium-learning > .eyebrow {
+  margin-bottom: 24px;
+}
+.premium-learning > .card,
+.premium-learning > section > .card {
+  margin-bottom: 22px;
+}
+.premium-learning .card h1 {
+  font-size: 26px;
+  letter-spacing: -0.7px;
+  margin-bottom: 16px;
+}
+.premium-learning .card h3 {
+  margin-bottom: 10px;
+}
+.premium-learning .card p {
+  margin: 12px 0;
+}
+.premium-learning code {
+  display: block;
+  overflow-wrap: anywhere;
+  color: var(--muted);
+  font-size: 10px;
+  margin: 10px 0;
+}
+.premium-learning audio,
+.premium-learning video,
+.lesson-viewer audio,
+.lesson-viewer video {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  margin: 20px 0;
+}
+.premium-learning .test-selection-card,
+.course-catalog-card {
+  padding: 0;
+  overflow: hidden;
+}
+.course-card-body h3 {
+  margin: 16px 0;
+  font-size: 22px;
+}
+.premium-empty,
+.chart-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 35px;
+  text-align: center;
+  color: var(--muted);
+}
+.chart-empty {
+  min-height: 220px;
+  font-size: 12px;
+}
+.dashboard-aside .daily-card > .card {
+  padding: 0;
+  border: 0;
+  background: none;
+  box-shadow: none;
+  margin-top: 20px;
+}
+.dashboard-aside .daily-card > .card h2 {
+  font-size: 15px;
+  margin-bottom: 10px;
+}
+.dashboard-aside .daily-card > .card p {
+  margin: 10px 0;
+  font-size: 12px;
+}
+.sidebar-user > span:nth-child(2) {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.premium-learning .editor-card > .field {
+  margin: 18px 20px 0;
+}
+.premium-learning .editor-card > .live-actions {
+  padding: 0 20px 16px;
+}
+.premium-learning .rich-editor {
+  min-height: 400px;
+  resize: vertical;
+}
+.recording-orbit {
+  font-size: 64px;
+  color: var(--primary);
+  margin: 10px auto;
+}
+.premium-results > .card {
+  padding: 24px;
+}
+.premium-settings {
+  max-width: 900px;
+}
+.premium-settings .card {
+  padding: 30px;
+}
+.lesson-viewer .preserve-text {
+  line-height: 1.9;
+  margin: 24px 0;
+}
+@media (max-width: 800px) {
+  .premium-catalog {
+    grid-template-columns: 1fr;
+  }
+  .premium-learning .writing-workspace,
+  .premium-learning .speaking-layout {
+    grid-template-columns: 1fr;
+  }
+  .marketing-nav > div > .language-button {
+    max-width: 65px;
+    padding: 6px;
+    font-size: 10px;
+  }
+  .marketing-nav > div {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+  .chart-empty {
+    min-height: 160px;
+  }
+}
+@media (max-width: 420px) {
+  .marketing-nav {
+    gap: 8px;
+    align-items: flex-start;
+  }
+  .marketing-nav > div {
+    max-width: 150px;
+    gap: 6px;
+  }
+  .marketing-nav > div > .language-button {
+    order: 3;
+    max-width: 100px;
+    width: 100px;
+  }
+  .premium-settings .card {
+    padding: 20px;
+  }
+  .premium-learning .test-cover {
+    padding: 24px;
+  }
+  .premium-learning .test-cover > span {
+    font-size: 36px;
+  }
+}
+.auth-brand-panel .brand small {
+  color: #52617a;
+}
+[data-theme="dark"] .auth-brand-panel .brand small {
+  color: #b3c4df;
+}
+.premium-settings {
+  max-width: none;
+}
+.premium-settings .card > .notice {
+  margin-top: 24px;
+}
+.premium-settings .card > p {
+  margin: 12px 0;
+  overflow-wrap: anywhere;
+}
+.premium-settings .live-check {
+  margin-top: 28px;
+}
+.premium-progress-summary {
+  margin: 24px 0;
+}
+.premium-progress-summary .card {
+  padding: 24px;
+}

@@ -118,6 +118,9 @@ const messages = {
   draft: ["Draft", "Qoralama", "Черновик"],
   published: ["Published", "Nashr etilgan", "Опубликовано"],
   archived: ["Archived", "Arxivlangan", "В архиве"],
+  premium_ambition: ["Your ambition.", "Sizning maqsadingiz.", "Ваши амбиции."],
+  premium_little: ["A little", "Bir oz", "Немного"],
+  premium_direction: ["direction.", "yo‘nalish.", "направления."],
   password_recovery_unavailable: [
     "Email recovery is not configured for this local installation.",
     "Bu mahalliy o‘rnatishda email orqali tiklash sozlanmagan.",

@@ -26,7 +26,8 @@ import {
   Command,
 } from "lucide-react";
 import * as Dropdown from "@radix-ui/react-dropdown-menu";
-import { useAcademy } from "@/store/use-academy";
+import { useApp, useResource } from "@/features/academy-context";
+import { api, type Row } from "@/lib/api";
 import { translations } from "@/data/content";
 import { Modal, Tooltip } from "@/components/ui/primitives";
 export function Brand({ small = false }: { small?: boolean }) {
@@ -63,7 +64,34 @@ export function Shell({
   const [search, setSearch] = useState(false);
   const [query, setQuery] = useState("");
   const [notifications, setNotifications] = useState(false);
-  const { session, theme, lang, preferences, logout } = useAcademy();
+  const { me, theme, lang, setLang, setTheme, run, refresh } = useApp();
+  const session = me
+    ? {
+        name: me.profile.display_name,
+        role: me.roles.includes("ADMIN")
+          ? "admin"
+          : me.roles.includes("TEACHER")
+            ? "teacher"
+            : "student",
+      }
+    : null;
+  const inbox = useResource<Record<string, Row[]>>("dashboard");
+  const preferences = ({
+    theme,
+    lang,
+  }: {
+    theme?: "light" | "dark";
+    lang?: "en" | "uz" | "ru";
+  }) => {
+    if (theme) void setTheme(theme);
+    if (lang) setLang(lang);
+  };
+  const logout = () =>
+    void run(async () => {
+      await api("auth/logout", "POST", {});
+      await refresh();
+      router.replace("/login");
+    });
   const t = translations[lang];
   const router = useRouter();
   useEffect(() => {
@@ -102,12 +130,12 @@ export function Shell({
         </div>
         <button
           className="workspace-switch"
-          onClick={() => router.push("/login")}
+          onClick={() => router.push("/settings")}
         >
           <span className="workspace-avatar">A</span>
           <span>
             Personal workspace
-            <small>{session ? `${session.role} demo` : "Student demo"}</small>
+            <small>{session?.role}</small>
           </span>
           <ChevronDown size={15} />
         </button>
@@ -137,17 +165,17 @@ export function Shell({
             </span>
             <h4>A little more ambition?</h4>
             <p>Explore what’s next for your IELTS journey.</p>
-            <Link href="/#pricing">
-              Explore plans <ArrowUpRight size={15} />
+            <Link href="/courses">
+              Explore courses <ArrowUpRight size={15} />
             </Link>
           </div>
-          {session?.role === "teacher" && (
+          {me?.roles.some((role) => ["TEACHER", "ADMIN"].includes(role)) && (
             <Link className="nav-link" href="/teacher">
               <GraduationCap size={19} />
               {t.teacher}
             </Link>
           )}
-          {session?.role === "admin" && (
+          {me?.roles.includes("ADMIN") && (
             <Link className="nav-link" href="/admin">
               <Command size={19} />
               {t.admin}
@@ -163,8 +191,8 @@ export function Shell({
           <div className="sidebar-user">
             <span className="avatar">{session?.name?.slice(0, 1) ?? "A"}</span>
             <span>
-              {session?.name ?? "Alex Morgan"}
-              <small>Local demo account</small>
+              {session?.name ?? ""}
+              <small>{me?.email}</small>
             </span>
             <Tooltip label={t.logout}>
               <button
@@ -172,7 +200,6 @@ export function Shell({
                 aria-label={t.logout}
                 onClick={() => {
                   logout();
-                  router.push("/login");
                 }}
               >
                 <LogOut size={16} />
@@ -200,7 +227,9 @@ export function Shell({
                   ? t.teacher
                   : route === "/admin"
                     ? t.admin
-                    : t.settings}
+                    : route === "/onboarding"
+                      ? "Your learning profile"
+                      : t.settings}
             </strong>
           </div>
           <div className="top-actions">
@@ -256,7 +285,6 @@ export function Shell({
               onClick={() => setNotifications(true)}
             >
               <Bell size={19} />
-              <i />
             </button>
             <Link
               href="/settings"
@@ -267,15 +295,6 @@ export function Shell({
             </Link>
           </div>
         </header>
-        <div className="demo-banner" role="region" aria-label="Demo status">
-          <span>
-            <span className="live-dot" /> LOCAL DEMO
-          </span>{" "}
-          Your space to explore. Progress is saved in this browser.
-          <Link href="/login">
-            Switch role <ArrowUpRight size={12} />
-          </Link>
-        </div>
         <main id="main" className="page-content">
           {children}
         </main>
@@ -319,24 +338,30 @@ export function Shell({
         open={notifications}
         onOpenChange={setNotifications}
         title="Your learning inbox"
-        description="Illustrative reminders for your demo workspace."
+        description="Assignments from your teachers."
       >
-        <div className="notification-item">
-          <span className="skill-icon orange">
-            <PenLine size={20} />
-          </span>
-          <div>
-            <h4>Time for a little writing?</h4>
-            <p>Your next Task 2 practice is ready whenever you are.</p>
-            <Link className="text-link" href="/practice/writing">
-              Open writing workspace →
-            </Link>
-          </div>
-        </div>
-        <div className="notice">
-          Notifications are local examples. No email or push notifications are
-          sent.
-        </div>
+        {inbox.data?.assignments.length ? (
+          inbox.data.assignments.map((row) => (
+            <div className="notification-item" key={row.id}>
+              <span className="skill-icon orange">
+                <PenLine size={20} />
+              </span>
+              <div>
+                <h4>{row.title}</h4>
+                <p>{String(row.due_date || "")}</p>
+                <Link
+                  href="/dashboard"
+                  onClick={() => setNotifications(false)}
+                  className="text-link"
+                >
+                  View assignments →
+                </Link>
+              </div>
+            </div>
+          ))
+        ) : (
+          <p className="notice">No assignments yet.</p>
+        )}
       </Modal>
     </div>
   );

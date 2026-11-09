@@ -22,8 +22,10 @@ import { motion } from "motion/react";
 import { Brand } from "@/components/layout/shell";
 import { Card, Badge, Modal } from "@/components/ui/primitives";
 import { SkillProgressChart } from "@/components/charts/skill-chart";
-import { skills, courses } from "@/data/content";
+import { learningSkills as skills, LanguageControl } from "./premium-ui";
+import { useApp } from "./academy-context";
 export function Marketing() {
+  const { t, me } = useApp();
   const [mobile, setMobile] = useState(false);
   const [plan, setPlan] = useState("");
   return (
@@ -46,8 +48,9 @@ export function Marketing() {
           </a>
         </nav>
         <div>
-          <Link className="button ghost" href="/login">
-            Log in
+          <LanguageControl />
+          <Link className="button ghost" href={me ? me.destination : "/login"}>
+            {t(me ? "dashboard" : "login")}
           </Link>
           <Link className="button primary" href="/register">
             Get started <ArrowUpRight size={15} />
@@ -74,8 +77,9 @@ export function Marketing() {
                 POSSIBILITY.
               </div>
               <h1>
-                Your ambition.
-                <br />A little <em>direction.</em>
+                {t("premium_ambition")}
+                <br />
+                {t("premium_little")} <em>{t("premium_direction")}</em>
                 <span className="hero-asterisk">✳</span>
               </h1>
               <p>
@@ -89,7 +93,7 @@ export function Marketing() {
                 </Link>
                 <Link className="button outline" href="/dashboard">
                   <Play size={15} />
-                  Explore the demo
+                  Explore your workspace
                 </Link>
               </div>
               <div className="hero-fineprint">
@@ -137,7 +141,7 @@ export function Marketing() {
               <div>
                 <small>YOUR NEXT MILESTONE</small>
                 <strong>
-                  Band 7.5 <span>↗</span>
+                  Your goal <span>↗</span>
                 </strong>
               </div>
             </div>
@@ -217,7 +221,7 @@ export function Marketing() {
                   <h3>
                     Make progress, every day. <span>✺</span>
                   </h3>
-                  <Badge color="slate">DEMO PREVIEW</Badge>
+                  <Badge color="slate">WORKSPACE PREVIEW</Badge>
                 </div>
                 <div className="preview-welcome">
                   <div>
@@ -238,8 +242,7 @@ export function Marketing() {
                     <div key={s.id}>
                       <small>{s.title}</small>
                       <strong>
-                        {s.band.toFixed(1)}
-                        <span>/9</span>
+                        —<span>/9</span>
                       </strong>
                       <div className={`preview-progress ${s.color}`} />
                     </div>
@@ -248,7 +251,7 @@ export function Marketing() {
                 <div className="preview-chart">
                   <div>
                     <h4>A little progress adds up</h4>
-                    <p>Illustrative sample scores</p>
+                    <p>Your results appear after graded practice</p>
                   </div>
                   <SkillProgressChart compact />
                 </div>
@@ -258,7 +261,7 @@ export function Marketing() {
           <div className="preview-caption">
             <span>
               <ShieldCheck size={14} />
-              Fully interactive frontend demo · data stays on your device
+              Private accounts · progress saved to your academy
             </span>
             <Link href="/dashboard">
               Take a closer look <ArrowRight size={14} />
@@ -276,8 +279,8 @@ export function Marketing() {
               </h2>
             </div>
             <p>
-              Original sample exercises, considered workspaces, and useful
-              reflections. Every skill gets the space it deserves.
+              Focused practice, considered workspaces, and useful reflections.
+              Every skill gets the space it deserves.
             </p>
           </div>
           <div className="landing-skills">
@@ -336,7 +339,7 @@ export function Marketing() {
                 Explore a clearly labeled feedback preview. Live AI evaluation
                 is planned for a future release.
               </p>
-              <Badge color="purple">UPCOMING · DEMO PREVIEW</Badge>
+              <Badge color="purple">UPCOMING · WORKSPACE PREVIEW</Badge>
               <Link href="/practice/writing" className="text-link">
                 Explore the writing studio <ArrowRight size={14} />
               </Link>
@@ -347,12 +350,12 @@ export function Marketing() {
               </span>
               <h3>See the whole journey</h3>
               <p>
-                Move through all four skills in a guided sample mock exam, with
-                timers and saved answers.
+                Move through all four skills in a guided mock exam, with timers
+                and saved answers.
               </p>
               <Badge color="blue">SHORT SAMPLE EXAM</Badge>
               <Link href="/mock-exams" className="text-link">
-                Try a sample exam <ArrowRight size={14} />
+                Explore mock exams <ArrowRight size={14} />
               </Link>
             </Card>
             <Card className="learning-progress-card">
@@ -362,8 +365,8 @@ export function Marketing() {
                 </span>
                 <h3>Small steps, made visible.</h3>
                 <p>
-                  Track actual practice history and explore illustrative charts
-                  in one calm space.
+                  Track your practice history and graded results in one calm
+                  space.
                 </p>
                 <Link href="/progress" className="text-link">
                   Explore your progress <ArrowRight size={14} />
@@ -395,24 +398,24 @@ export function Marketing() {
             </Link>
           </div>
           <div className="marketing-course-grid">
-            {courses.slice(0, 3).map((c) => (
+            {skills.slice(0, 3).map((c) => (
               <Link
                 key={c.id}
-                href={`/courses?course=${c.id}`}
+                href="/courses"
                 className="card marketing-course"
               >
-                <div className={`course-art ${c.color}`}>
-                  <span>{c.icon}</span>
-                  <small>{c.tag}</small>
+                <div className={"course-art " + c.color}>
+                  <span>
+                    <c.icon size={44} />
+                  </span>
+                  <small>MAKE ROOM FOR YOUR POTENTIAL</small>
                 </div>
                 <div>
-                  <Badge color={c.color}>{c.category.toUpperCase()}</Badge>
-                  <h3>{c.title}</h3>
-                  <p>
-                    {c.lessons} original text lessons · {c.duration}
-                  </p>
+                  <Badge color={c.color}>{c.title.toUpperCase()}</Badge>
+                  <h3>Make space for {c.id}</h3>
+                  <p>{c.description}</p>
                   <span className="text-link">
-                    Explore course <ArrowRight size={15} />
+                    Explore the learning library <ArrowRight size={15} />
                   </span>
                 </div>
               </Link>
@@ -430,8 +433,8 @@ export function Marketing() {
               </h2>
             </div>
             <p>
-              Every feature in this frontend demo is free to explore. Paid plans
-              are a product preview, with no checkout connected.
+              Start with practice, courses and saved progress. Paid plans are a
+              product preview, with no checkout connected.
             </p>
           </div>
           <div className="pricing-grid">
@@ -441,12 +444,12 @@ export function Marketing() {
                 price: "Free",
                 sub: "A little space to begin.",
                 items: [
-                  "Four skill practice samples",
-                  "Original demo courses",
-                  "Local progress & drafts",
-                  "Student, teacher & admin demos",
+                  "Four skill practice",
+                  "Published learning courses",
+                  "Saved progress & drafts",
+                  "Student learning workspace",
                 ],
-                cta: "Explore the demo",
+                cta: "Explore your workspace",
               },
               {
                 name: "Grow",
@@ -517,19 +520,19 @@ export function Marketing() {
             {[
               {
                 q: "Is this an official IELTS platform?",
-                a: "No. IELTS Academy is an independent frontend demonstration. It is not affiliated with or endorsed by IELTS, the British Council, IDP, or Cambridge. All practice passages and scripts are original samples.",
+                a: "No. IELTS Academy is an independent learning platform. It is not affiliated with or endorsed by IELTS, the British Council, IDP, or Cambridge. Learning content is published by your academy administrators.",
               },
               {
                 q: "Can I use the practice tools for free?",
-                a: "Yes. All local demo features are free to explore. Paid plans are previews only. There is no payment gateway or checkout.",
+                a: "There is no payment gateway or checkout. Paid plans are previews only; register to access the published learning library.",
               },
               {
                 q: "Are the AI scores real evaluations?",
-                a: "No. Writing and Speaking submissions await evaluation. You can explicitly open fixed demo feedback to see the intended interface, but it does not analyse your response. Objective Reading and Listening samples are checked deterministically.",
+                a: "Reading and Listening answers are graded by the server. Writing and Speaking can receive teacher reviews. Optional AI feedback requires academy configuration and your consent, and is clearly identified as an estimate.",
               },
               {
                 q: "Where is my progress saved?",
-                a: "Drafts, sessions, and preferences are saved in this browser using localStorage. Speaking recordings are saved in IndexedDB. Nothing syncs across devices, and clearing browser storage removes your data.",
+                a: "Your work is saved to your academy account. Sign in to resume your courses, drafts and results. Recordings are private and accessible only to you and authorized reviewers.",
               },
               {
                 q: "Does the platform support Uzbek and Russian?",
@@ -537,7 +540,7 @@ export function Marketing() {
               },
               {
                 q: "Can teachers and language centers try it?",
-                a: "Yes. Choose Teacher or Admin on the demo login screen to explore local record management, assignments, review forms, and illustrative analytics. These are frontend workflows, not live multi-user services.",
+                a: "Yes. Administrators assign Teacher roles and student relationships. Teachers can review assigned students; administrators manage content and permissions. Roles are verified by the server.",
               },
             ].map((f) => (
               <details key={f.q}>
@@ -572,11 +575,11 @@ export function Marketing() {
         <div>
           <Link href="/dashboard">Demo workspace</Link>
           <Link href="/courses">Courses</Link>
-          <Link href="/login">Teacher & admin demos</Link>
+          <Link href="/login">Teacher & admin access</Link>
           <Link href="/settings">Privacy & preferences</Link>
         </div>
         <div className="footer-legal">
-          <span>© 2026 IELTS Academy. An independent educational demo.</span>
+          <span>© 2026 IELTS Academy. An independent learning platform.</span>
           <span>Built for your next chapter.</span>
         </div>
       </footer>
@@ -590,10 +593,10 @@ export function Marketing() {
       >
         <p>
           There is no checkout, billing, or payment collection. Explore the free
-          demo today to experience the intended workflows.
+          academy today to start your learning journey.
         </p>
         <Link href="/dashboard" className="button primary">
-          Explore free demo <ArrowRight size={16} />
+          Create your account <ArrowRight size={16} />
         </Link>
       </Modal>
     </div>
