@@ -46,9 +46,9 @@ export default function HtmlImportPage(){
   const count=data?Object.values(data.sections).flatMap(x=>x.flatMap(g=>g.items||[])).length:0;
   async function upload(file:File|undefined){
     if(!file)return;
-    setMessage("");setData(null);setName(file.name.replace(/\\.html?$/i,""));
+    setMessage("");setData(null);setName(file.name.replace(/\.html?$/i,""));
     try{
-      if(!/\\.html?$/i.test(file.name))throw Error("Select an .html file.");
+      if(!/\.html?$/i.test(file.name))throw Error("Select an .html file.");
       const parsed=parse(await file.text());
       setData(parsed);
     }catch(e){setMessage(e instanceof Error?e.message:String(e));}
