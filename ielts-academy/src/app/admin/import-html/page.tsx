@@ -16,12 +16,12 @@ function extract(source:string, name:string):unknown {
     if(quoted){if(escaped)escaped=false;else if(c==="\\")escaped=true;else if(c==='"')quoted=false;continue;}
     if(c==='"'){quoted=true;continue;}
     if(c==="{")depth++;
-    if(c==="}" && --depth===0) return JSON.parse(source.slice(start,i+1));
+    if(c==="}"){depth--;if(depth===0) return JSON.parse(source.slice(start,i+1));}
   }
   throw Error("Incomplete "+name);
 }
 function clean(value:string):string {
-  return value.replace(/<[^>]*>/g," ").replace(/&ndash;/g,"–").replace(/&rsquo;/g,"’").replace(/&lsquo;/g,"‘").replace(/&amp;/g,"&").replace(/&nbsp;/g," ").replace(/\\s+/g," ").trim();
+  return value.replace(/<[^>]*>/g," ").replace(/&ndash;/g,"–").replace(/&rsquo;/g,"’").replace(/&lsquo;/g,"‘").replace(/&amp;/g,"&").replace(/&nbsp;/g," ").replace(/\s+/g," ").trim();
 }
 function parse(source:string):ImportData{
   if(source.length>5_000_000)throw Error("HTML file exceeds 5 MB.");
