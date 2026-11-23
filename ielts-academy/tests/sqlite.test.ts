@@ -1057,3 +1057,523 @@ describe("SQLite API integration (real migrations, passwords and sessions)", () 
     ).toBe(403);
   });
 });
+async function newUser(name: string) {
+  state.jar.clear();
+  expect(
+    (
+      await api("auth/register", "POST", {
+        email: email(name + randomUUID().slice(0, 6)),
+        password,
+        name,
+      })
+    ).status,
+  ).toBe(200);
+  const me = await api("me");
+  sessions[me.data.id] = state.jar.get("academy_session")!;
+  return me.data.id as string;
+}
+const future = () => new Date(Date.now() + 30 * 86400000).toISOString();
+describe("Editable promo codes, scoped access, paid platform and HTML import", () => {
+  it("edits a promo code's days, limit, expiry and scope and guards limit/delete rules", async () => {
+    as(admin);
+    const c = (
+      await api("admin/subscriptions/codes", "POST", {
+        days: 30,
+        limit: 2,
+        label: "Edit me",
+      })
+    ).data;
+    const edit = await api("admin/subscriptions/code", "POST", {
+      id: c.id,
+      label: "Edited",
+      days: 90,
+      limit: 5,
+      expires_at: future(),
+      scope: ["reading", "writing"],
+    });
+    expect(edit.status).toBe(200);
+    const row = (await api("admin/subscriptions")).data.codes.find(
+      (x: { id: string }) => x.id === c.id,
+    );
+    expect(row).toMatchObject({
+      label: "Edited",
+      days: 90,
+      limit: 5,
+      scope: ["reading", "writing"],
+    });
+    expect(row.expires_at).not.toBeNull();
+    const user = await newUser("promo-edit");
+    expect(
+      (await api("subscription/redeem", "POST", { code: c.code })).status,
+    ).toBe(200);
+    as(admin);
+    const low = await api("admin/subscriptions/code", "POST", {
+      id: c.id,
+      limit: 0 + 1 - 1 || 1,
+    });
+    expect(low.status).toBe(200); // used=1, limit 1 is allowed
+    const tooLow = await api("admin/subscriptions/code", "POST", {
+      id: c.id,
+      limit: 1,
+      days: 10,
+    });
+    expect(tooLow.status).toBe(200);
+    expect(
+      (
+        await api("admin/subscriptions/code", "POST", {
+          id: c.id,
+          delete: true,
+        })
+      ).detail,
+    ).toBe("reason_code_used");
+    const unused = (
+      await api("admin/subscriptions/codes", "POST", { days: 3, limit: 1 })
+    ).data;
+    expect(
+      (
+        await api("admin/subscriptions/code", "POST", {
+          id: unused.id,
+          revoke: true,
+        })
+      ).status,
+    ).toBe(200);
+    expect(
+      (
+        await api("admin/subscriptions/code", "POST", {
+          id: unused.id,
+          revoke: false,
+        })
+      ).status,
+    ).toBe(200);
+    expect(
+      (
+        await api("admin/subscriptions/code", "POST", {
+          id: unused.id,
+          delete: true,
+        })
+      ).status,
+    ).toBe(200);
+    // the redeemed grant copied the scope and the days from when it was redeemed
+    const grant = (await api("admin/subscriptions")).data.subscriptions.find(
+      (x: { user_id: string }) => x.user_id === user,
+    );
+    expect(grant.scope).toEqual(["reading", "writing"]);
+  });
+  it("rejects a limit below the redemptions already used with a readable reason", async () => {
+    as(admin);
+    const c = (
+      await api("admin/subscriptions/codes", "POST", { days: 3, limit: 3 })
+    ).data;
+    for (const name of ["lim-a", "lim-b"]) {
+      await newUser(name);
+      expect(
+        (await api("subscription/redeem", "POST", { code: c.code })).status,
+      ).toBe(200);
+    }
+    as(admin);
+    const r = await api("admin/subscriptions/code", "POST", {
+      id: c.id,
+      limit: 1,
+    });
+    expect(r.status).toBe(409);
+    expect(r.detail).toBe("reason_limit_below_used");
+  });
+  it("limits a scoped code to the chosen categories", async () => {
+    const s = new Store(prisma, admin, true);
+    const reading = await s.add("tests", {
+      title: "Scoped reading",
+      skill: "reading",
+      variant: "academic",
+      duration_seconds: 3600,
+      status: "published",
+      access_tier: "premium",
+    });
+    const writing = await s.add("writing_tasks", {
+      title: "Scoped writing",
+      prompt: "x",
+      task_number: 2,
+      suggested_words: 250,
+      duration_seconds: 2400,
+      status: "published",
+      access_tier: "premium",
+    });
+    as(admin);
+    const c = (
+      await api("admin/subscriptions/codes", "POST", {
+        days: 7,
+        limit: 1,
+        scope: ["reading"],
+      })
+    ).data;
+    const user = await newUser("scoped");
+    expect(await as(user).visible("tests", reading)).toBe(false);
+    expect(
+      (await api("subscription/redeem", "POST", { code: c.code })).status,
+    ).toBe(200);
+    const mine = (await api("subscription")).data;
+    expect(mine.tier).toBe("premium");
+    expect(mine.scope).toEqual(["reading"]);
+    expect(await as(user).visible("tests", reading)).toBe(true);
+    expect(await as(user).visible("writing_tasks", writing)).toBe(false);
+    const catalog = (await api("catalog/writing_tasks")).data;
+    expect(
+      catalog.find((x: { id: string }) => x.id === writing.id).locked,
+    ).toBe(true);
+    // a full grant opens everything and does not stack onto the scoped one
+    as(admin);
+    expect(
+      (
+        await api("admin/subscriptions/grant", "POST", {
+          user_id: user,
+          days: 7,
+        })
+      ).status,
+    ).toBe(200);
+    expect(await as(user).visible("writing_tasks", writing)).toBe(true);
+  });
+  it("makes the platform paid when the paywall is on, except content marked free", async () => {
+    const s = new Store(prisma, admin, true);
+    const untagged = await s.add("writing_tasks", {
+      title: "No tier set",
+      prompt: "x",
+      task_number: 2,
+      suggested_words: 250,
+      duration_seconds: 2400,
+      status: "published",
+    });
+    const sample = await s.add("writing_tasks", {
+      title: "Free sample",
+      prompt: "x",
+      task_number: 2,
+      suggested_words: 250,
+      duration_seconds: 2400,
+      status: "published",
+      access_tier: "free",
+    });
+    const user = await newUser("paywall");
+    expect(await as(user).visible("writing_tasks", untagged)).toBe(true);
+    as(admin);
+    expect(
+      (await api("admin/settings", "PATCH", { paywall_enabled: true })).status,
+    ).toBe(200);
+    expect(await as(user).visible("writing_tasks", untagged)).toBe(false);
+    expect(await as(user).visible("writing_tasks", sample)).toBe(true);
+    expect(
+      (await api("catalog/writing_tasks")).data.find(
+        (x: { id: string }) => x.id === untagged.id,
+      ).locked,
+    ).toBe(true);
+    // admins and the AI settings keep working with a partial settings update
+    as(admin);
+    const settings = (await api("admin/settings")).data;
+    expect(settings.paywall_enabled).toBe(true);
+    expect(settings.ai_daily_user_limit).toBe(5);
+    // a promo code opens it
+    const c = (
+      await api("admin/subscriptions/codes", "POST", { days: 1, limit: 1 })
+    ).data;
+    as(user);
+    expect(
+      (await api("subscription/redeem", "POST", { code: c.code })).status,
+    ).toBe(200);
+    expect(await as(user).visible("writing_tasks", untagged)).toBe(true);
+    // bulk switch and switching the paywall back off
+    as(admin);
+    const bulk = await api("admin/content-tier", "POST", { tier: "free" });
+    expect(bulk.status).toBe(200);
+    expect(bulk.data.changed).toBeGreaterThan(0);
+    await api("admin/settings", "PATCH", { paywall_enabled: false });
+    expect(
+      (await api("admin/content-tier", "POST", { tier: "nope" })).status,
+    ).toBe(400);
+    state.jar.set("academy_session", sessions[student]);
+    expect(
+      (await api("admin/content-tier", "POST", { tier: "free" })).status,
+    ).toBe(403);
+  });
+  it("explains rejected saves with the invalid field or the broken rule", async () => {
+    as(admin);
+    const long = "x".repeat(2001);
+    const bad = await api("admin/content/writing_tasks", "POST", {
+      title: "T",
+      prompt: "",
+      task_number: 2,
+      suggested_words: 250,
+      duration_seconds: 2400,
+    });
+    expect(bad.status).toBe(400);
+    expect(bad.detail).toBe("fields:prompt");
+    const test = (
+      await api("admin/content/tests", "POST", {
+        title: "Reasons",
+        skill: "reading",
+        variant: "academic",
+        duration_seconds: 3600,
+      })
+    ).data;
+    const section = (
+      await api("admin/content/test_sections", "POST", {
+        test_id: test.id,
+        title: "S1",
+        position: 0,
+      })
+    ).data;
+    // a realistic 600-character question prompt is accepted now
+    const q = await api("admin/content/questions", "POST", {
+      section_id: section.id,
+      prompt: "Which statement best matches paragraph B? ".repeat(15),
+      kind: "text",
+      position: 0,
+      points: 1,
+    });
+    expect(q.status).toBe(200);
+    expect(
+      (
+        await api("admin/content/questions", "POST", {
+          section_id: section.id,
+          prompt: long,
+          kind: "text",
+          position: 1,
+          points: 1,
+        })
+      ).detail,
+    ).toBe("fields:prompt");
+    const publish = await api("admin/content/tests/" + test.id, "PATCH", {
+      status: "published",
+    });
+    expect(publish.status).toBe(409);
+    expect(publish.detail).toMatch(/^reason_missing_key:1/);
+    const parent = await api(
+      "admin/content/test_sections/" + section.id,
+      "DELETE",
+    );
+    expect(parent.status).toBe(409);
+    expect(parent.detail).toBe("reason_in_use:questions");
+  });
+  it("gives an estimated IELTS band when a test has no custom thresholds", async () => {
+    const s = new Store(prisma, admin, true);
+    const test = await s.add("tests", {
+      title: "Band test",
+      skill: "reading",
+      variant: "academic",
+      duration_seconds: 600,
+      status: "published",
+      access_tier: "free",
+    });
+    const sec = await s.add("test_sections", {
+      test_id: test.id,
+      title: "S",
+      position: 0,
+    });
+    const q = await s.add("questions", {
+      section_id: sec.id,
+      prompt: "Capital?",
+      kind: "text",
+      position: 0,
+      points: 1,
+    });
+    await s.add("answer_keys", {
+      question_id: q.id,
+      accepted: ["paris"],
+      explanation: "",
+    });
+    const user = await newUser("band");
+    const attempt = (await api("attempts", "POST", { test_id: test.id })).data;
+    const id = attempt.id || attempt.attempt_id;
+    await api("attempts/" + id, "PATCH", { answers: { [q.id]: "Paris" } });
+    const done = await api("attempts/" + id + "/submit", "POST", {});
+    expect(done.status).toBe(200);
+    const result = (await api("attempts/" + id)).data;
+    expect(result.raw_score).toBe(1);
+    expect(result.band).toBe(9);
+    void user;
+  });
+  it("imports a 40-question CDI HTML test in one request (no rate limit) as a draft", async () => {
+    const passages: Record<string, unknown> = {};
+    const sections: Record<string, unknown> = {};
+    for (const p of [1, 2, 3]) {
+      passages[p] = {
+        title: "Passage " + p,
+        content:
+          "<p><b>A</b> First paragraph &amp; more.</p><p><b>B</b> Second.</p>",
+        headings: [
+          { id: "i", text: "Origins" },
+          { id: "ii", text: "Trade" },
+        ],
+      };
+      const n = (k: number) => (p - 1) * 14 + k;
+      sections[p] = [
+        {
+          type: "tfng",
+          items: [1, 2, 3, 4, 5].map((k) => ({
+            id: n(k),
+            label: "Statement " + n(k),
+            answer: "T",
+          })),
+        },
+        {
+          type: "matching-headings",
+          items: [6, 7].map((k) => ({
+            id: n(k),
+            label: "Paragraph",
+            answer: "ii",
+          })),
+        },
+        {
+          type: "mcq",
+          items: [8].map((k) => ({
+            id: n(k),
+            label: "Pick one",
+            options: ["Cat", "Dog", "Bird"],
+            answer: "Dog",
+          })),
+        },
+        {
+          type: "fill",
+          wordLimit: 2,
+          items: [9, 10, 11, 12, 13].map((k) => ({
+            id: n(k),
+            label: "Fill " + n(k),
+            answer: ["milk", "sugar"],
+          })),
+        },
+      ];
+    }
+    // JavaScript-literal style (unquoted keys, single quotes, trailing commas, comments)
+    const literal = (v: unknown) =>
+      JSON.stringify(v, null, 1)
+        .replace(/"(\w+)":/g, "$1:")
+        .replace(/: "([^"\\]*)"/g, ": '$1'");
+    const html = `<html><head><title>Cambridge 19 Reading</title></head><body><script>
+      // test data
+      const PASSAGES = ${literal(passages)};
+      const SECTIONS = ${literal(sections)}; /* end */
+      const READING_EXPLANATIONS = { 1: 'Because paragraph A says so.', };
+    </script></body></html>`;
+    as(admin);
+    const dry = await api("admin/import-html", "POST", {
+      html,
+      title: "Cambridge 19",
+      dry_run: true,
+    });
+    expect(dry.status).toBe(200);
+    expect(dry.data).toMatchObject({
+      skill: "reading",
+      parts: 3,
+      questions: 39,
+      detected_title: "Cambridge 19 Reading",
+      test_id: null,
+    });
+    const before = await prisma.entity.count({ where: { kind: "questions" } });
+    as(teacher);
+    const run = await api("admin/import-html", "POST", {
+      html,
+      title: "Cambridge 19",
+      access_tier: "premium",
+    });
+    expect(run.status).toBe(200);
+    const store = new Store(prisma, admin, true);
+    const test = await store.get("tests", run.data.test_id);
+    expect(test).toMatchObject({
+      status: "draft",
+      skill: "reading",
+      access_tier: "premium",
+    });
+    expect(await prisma.entity.count({ where: { kind: "questions" } })).toBe(
+      before + 39,
+    );
+    const sectionIds = (await store.all("test_sections"))
+      .filter((x) => x.test_id === test!.id)
+      .map((x) => x.id);
+    expect(sectionIds).toHaveLength(3);
+    const passage = (await store.all("passages")).find(
+      (x) => x.section_id === sectionIds[0],
+    );
+    expect(passage!.body).toBe("A First paragraph & more.\nB Second.");
+    const qs = (await store.all("questions")).filter((x) =>
+      sectionIds.includes(x.section_id),
+    );
+    const keys = await store.all("answer_keys");
+    const tf = qs.find((x) => x.prompt === "Statement 1")!;
+    expect(tf.kind).toBe("true_false_not_given");
+    expect(keys.find((k) => k.question_id === tf.id)).toMatchObject({
+      accepted: ["TRUE"],
+      explanation: "Because paragraph A says so.",
+    });
+    const mcq = qs.find((x) => x.prompt === "Pick one")!;
+    expect(keys.find((k) => k.question_id === mcq.id)!.accepted).toEqual(["B"]);
+    const fill = qs.find((x) => x.prompt === "Fill 9")!;
+    expect(fill.max_words).toBe(2);
+    expect(keys.find((k) => k.question_id === fill.id)!.accepted).toEqual([
+      "milk",
+      "sugar",
+    ]);
+    // every question has a key, so it can be published right away
+    as(admin);
+    expect(
+      (
+        await api("admin/content/tests/" + test!.id, "PATCH", {
+          status: "published",
+        })
+      ).status,
+    ).toBe(200);
+  });
+  it("rejects HTML without recognizable test data and never runs uploaded code", async () => {
+    as(admin);
+    const none = await api("admin/import-html", "POST", {
+      html: "<html><body><script>const x = {a: 1};</script></body></html>",
+      title: "Nothing",
+    });
+    expect(none.status).toBe(400);
+    expect(none.detail).toMatch(/^reason_html_unrecognized/);
+    const code = await api("admin/import-html", "POST", {
+      html: "<script>const SECTIONS = {1: [(() => { globalThis.pwned = 1; return 1 })()]};</script>",
+      title: "Code",
+    });
+    expect(code.status).toBe(400);
+    expect(code.detail).toMatch(/^reason_html_parse:SECTIONS/);
+    expect((globalThis as { pwned?: number }).pwned).toBeUndefined();
+    as(student);
+    expect(
+      (
+        await api("admin/import-html", "POST", {
+          html: "x".repeat(50),
+          title: "T",
+        })
+      ).status,
+    ).toBe(403);
+  });
+});
+
+describe("Deleting content", () => {
+  it("lets authors delete unused content but still protects referenced and attempted content", async () => {
+    as(teacher);
+    const course = (
+      await api("admin/content/courses", "POST", {
+        title: "Delete me",
+        description: "",
+        status: "draft",
+        access_tier: "free",
+      })
+    ).data;
+    const courseModule = (
+      await api("admin/content/course_modules", "POST", {
+        course_id: course.id,
+        title: "M",
+        position: 0,
+      })
+    ).data;
+    // children block the parent with a readable reason...
+    const blocked = await api("admin/content/courses/" + course.id, "DELETE");
+    expect(blocked.status).toBe(409);
+    expect(blocked.detail).toBe("reason_in_use:course_modules");
+    // ...and removing them bottom-up works, audit history notwithstanding
+    expect(
+      (await api("admin/content/course_modules/" + courseModule.id, "DELETE"))
+        .status,
+    ).toBe(200);
+    expect(
+      (await api("admin/content/courses/" + course.id, "DELETE")).status,
+    ).toBe(200);
+  });
+});

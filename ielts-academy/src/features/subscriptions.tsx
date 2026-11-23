@@ -1,38 +1,72 @@
 "use client";
 import Link from "next/link";
-import { useEffect } from "react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { api, type Row } from "@/lib/api";
+import {
+  formatDate,
+  formatDateTime,
+  fromLocalInput,
+  toLocalInput,
+} from "@/lib/dates";
 import { useApp, useResource, ResourceState } from "./academy-context";
+
+const categories = [
+  ["listening", "listening"],
+  ["reading", "reading"],
+  ["writing", "writing"],
+  ["speaking", "speaking"],
+  ["courses", "courses"],
+  ["mock", "mock_exams"],
+] as const;
+
+function useScopeText() {
+  const { t } = useApp();
+  return (scope: unknown) =>
+    Array.isArray(scope) && scope.length
+      ? categories
+          .filter(([key]) => scope.includes(key))
+          .map(([, label]) => t(label))
+          .join(", ")
+      : t("p_scope_all");
+}
+
 export function SubscriptionPanel() {
   const { run, notify, t } = useApp();
+  const scopeText = useScopeText();
   const r = useResource<Row>("subscription");
+  const premium = r.data?.tier === "premium";
   return (
     <section className="card subscription-panel">
       <h2>{t("premium_access")}</h2>
       <ResourceState {...r}>
         <p>
-          <strong>{String(r.data?.tier || "free").toUpperCase()}</strong> ·{" "}
-          {String(r.data?.remaining_days || 0)} {t("days_remaining")}
+          <strong>{t(premium ? "premium" : "free").toUpperCase()}</strong>
+          {premium && (
+            <>
+              {" "}
+              · {String(r.data?.remaining_days || 0)} {t("days_remaining")}
+            </>
+          )}
         </p>
-        {!!r.data?.activated_at && (
-          <p>
-            Activated:{" "}
-            {new Date(String(r.data.activated_at)).toLocaleDateString()}
-          </p>
-        )}
-        {!!r.data?.expires_at && (
-          <p>
-            Expires: {new Date(String(r.data.expires_at)).toLocaleDateString()}
-          </p>
+        {premium && (
+          <>
+            <p>
+              {t("p_covers")}: {scopeText(r.data?.scope)}
+            </p>
+            <p>
+              {t("p_until")}: {formatDate(r.data?.expires_at)}
+            </p>
+          </>
         )}
         <form
           className="form-stack"
           onSubmit={(e) => {
             e.preventDefault();
-            const code = String(new FormData(e.currentTarget).get("code"));
+            const form = e.currentTarget;
+            const code = String(new FormData(form).get("code"));
             void run(async () => {
               await api("subscription/redeem", "POST", { code });
+              form.reset();
               await r.load();
               notify("saved");
             });
@@ -45,6 +79,7 @@ export function SubscriptionPanel() {
               className="input"
               minLength={8}
               maxLength={64}
+              pattern="[A-Za-z0-9\-]+"
               required
               autoComplete="off"
             />
@@ -55,8 +90,163 @@ export function SubscriptionPanel() {
     </section>
   );
 }
+
+function ScopePicker({
+  value,
+  onChange,
+}: {
+  value: string[];
+  onChange: (value: string[]) => void;
+}) {
+  const { t } = useApp();
+  return (
+    <fieldset className="field">
+      <legend>{t("p_scope")}</legend>
+      <div className="live-choices">
+        <label>
+          <input
+            type="checkbox"
+            checked={!value.length}
+            onChange={() => onChange([])}
+          />
+          {t("p_scope_all")}
+        </label>
+        {categories.map(([key, label]) => (
+          <label key={key}>
+            <input
+              type="checkbox"
+              checked={value.includes(key)}
+              onChange={(e) =>
+                onChange(
+                  e.target.checked
+                    ? [...value, key]
+                    : value.filter((x) => x !== key),
+                )
+              }
+            />
+            {t(label)}
+          </label>
+        ))}
+      </div>
+    </fieldset>
+  );
+}
+
+type PromoValues = {
+  label: string;
+  code: string;
+  days: number;
+  limit: number;
+  expires: string;
+  scope: string[];
+};
+function PromoForm({
+  initial,
+  submitLabel,
+  withCode,
+  onSubmit,
+  onCancel,
+}: {
+  initial?: Row;
+  submitLabel: string;
+  withCode?: boolean;
+  onSubmit: (v: PromoValues) => Promise<void> | void;
+  onCancel?: () => void;
+}) {
+  const { t } = useApp();
+  const [v, setV] = useState<PromoValues>({
+    label: String(initial?.label ?? ""),
+    code: "",
+    days: Number(initial?.days ?? 30),
+    limit: Number(initial?.limit ?? 1),
+    expires: toLocalInput(initial?.expires_at),
+    scope: Array.isArray(initial?.scope) ? (initial.scope as string[]) : [],
+  });
+  const set = <K extends keyof PromoValues>(k: K, value: PromoValues[K]) =>
+    setV((x) => ({ ...x, [k]: value }));
+  return (
+    <form
+      className="card form-stack"
+      onSubmit={(e) => {
+        e.preventDefault();
+        void onSubmit(v);
+      }}
+    >
+      <label className="field">
+        {t("p_label")}
+        <input
+          className="input"
+          value={v.label}
+          maxLength={100}
+          required
+          onChange={(e) => set("label", e.target.value)}
+        />
+      </label>
+      {withCode && (
+        <label className="field">
+          {t("p_code")}
+          <input
+            className="input"
+            value={v.code}
+            minLength={8}
+            maxLength={64}
+            pattern="[A-Za-z0-9\-]*"
+            autoComplete="off"
+            onChange={(e) => set("code", e.target.value)}
+          />
+        </label>
+      )}
+      <label className="field">
+        {t("p_days")}
+        <input
+          className="input"
+          type="number"
+          min={1}
+          max={3650}
+          value={v.days}
+          required
+          onChange={(e) => set("days", Number(e.target.value))}
+        />
+      </label>
+      <label className="field">
+        {t("p_limit")}
+        <input
+          className="input"
+          type="number"
+          min={Math.max(1, Number(initial?.used ?? 0))}
+          max={100000}
+          value={v.limit}
+          required
+          onChange={(e) => set("limit", Number(e.target.value))}
+        />
+      </label>
+      <label className="field">
+        {t("p_expires")}
+        <input
+          className="input"
+          type="datetime-local"
+          min={toLocalInput(new Date().toISOString())}
+          value={v.expires}
+          onChange={(e) => set("expires", e.target.value)}
+        />
+      </label>
+      <ScopePicker value={v.scope} onChange={(s) => set("scope", s)} />
+      {!withCode && <p className="muted">{t("p_edit_hint")}</p>}
+      <div className="live-actions">
+        <button className="button primary">{submitLabel}</button>
+        {onCancel && (
+          <button type="button" className="button outline" onClick={onCancel}>
+            {t("back")}
+          </button>
+        )}
+      </div>
+    </form>
+  );
+}
+
 export function SubscriptionManager() {
-  const { run, notify } = useApp();
+  const { run, notify, t } = useApp();
+  const scopeText = useScopeText();
   const [clock, setClock] = useState(() => Date.now());
   useEffect(() => {
     const timer = setInterval(() => setClock(Date.now()), 60000);
@@ -69,98 +259,82 @@ export function SubscriptionManager() {
   }>("admin/subscriptions");
   const users = useResource<Row[]>("admin/users");
   const [code, setCode] = useState("");
+  const [editing, setEditing] = useState("");
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("all");
+  const [grantScope, setGrantScope] = useState<string[]>([]);
+  const userName = (id: unknown) =>
+    String(users.data?.find((u) => u.id === id)?.display_name || id);
   async function mutate(path: string, body: unknown) {
     await run(async () => {
       await api("admin/subscriptions/" + path, "POST", body);
+      setEditing("");
       await r.load();
       notify("saved");
     });
   }
+  const subState = (s: Row) =>
+    s.revoked_at
+      ? "revoked"
+      : Date.parse(String(s.expires_at)) > clock
+        ? "active"
+        : "expired";
+  const codeState = (c: Row) =>
+    c.revoked_at
+      ? "revoked"
+      : !c.enabled
+        ? "disabled"
+        : c.expires_at && Date.parse(String(c.expires_at)) <= clock
+          ? "expired"
+          : "active";
   return (
     <section>
-      <h2>Subscriptions & promo codes</h2>
+      <h2>{t("p_title")}</h2>
       <ResourceState {...r}>
         <div className="summary-grid">
           {["active", "expired", "revoked"].map((kind) => (
             <div className="card" key={kind}>
-              <p>{kind}</p>
+              <p>{t("p_state_" + kind)}</p>
               <h3>
-                {r.data?.subscriptions.filter((s) =>
-                  kind === "revoked"
-                    ? !!s.revoked_at
-                    : !s.revoked_at &&
-                      (kind === "active"
-                        ? Date.parse(String(s.expires_at)) > clock
-                        : Date.parse(String(s.expires_at)) <= clock),
-                ).length || 0}
+                {r.data?.subscriptions.filter((s) => subState(s) === kind)
+                  .length || 0}
               </h3>
             </div>
           ))}
         </div>
         <div className="live-grid">
-          <form
-            className="card form-stack"
-            onSubmit={(e) => {
-              e.preventDefault();
-              const p = Object.fromEntries(new FormData(e.currentTarget));
-              void run(async () => {
-                const result = await api<{ code: string }>(
-                  "admin/subscriptions/codes",
-                  "POST",
-                  {
-                    label: p.label,
-                    code: p.code || undefined,
-                    days: Number(p.days),
-                    limit: Number(p.limit),
-                    expires_at: p.expires
-                      ? new Date(String(p.expires)).toISOString()
-                      : null,
-                  },
-                );
-                setCode(result.code);
-                await r.load();
-              });
-            }}
-          >
-            <h3>Create promo code</h3>
-            {[
-              ["label", "Label"],
-              ["code", "Custom code (optional)"],
-              ["days", "Days"],
-              ["limit", "Redemption limit"],
-              ["expires", "Expiration (optional)"],
-            ].map(([name, label]) => (
-              <label className="field" key={name}>
-                {label}
-                <input
-                  className="input"
-                  name={name}
-                  type={
-                    ["days", "limit"].includes(name)
-                      ? "number"
-                      : name === "expires"
-                        ? "datetime-local"
-                        : "text"
-                  }
-                  defaultValue={
-                    name === "days" ? 30 : name === "limit" ? 1 : undefined
-                  }
-                  min={1}
-                  max={name === "days" ? 3650 : 100000}
-                  required={["days", "limit", "label"].includes(name)}
-                />
-              </label>
-            ))}
-            <button className="button primary">Generate code</button>
+          <div>
+            <h3>{t("p_create")}</h3>
+            <PromoForm
+              withCode
+              submitLabel={t("p_create")}
+              onSubmit={(v) =>
+                run(async () => {
+                  const result = await api<{ code: string }>(
+                    "admin/subscriptions/codes",
+                    "POST",
+                    {
+                      label: v.label,
+                      code: v.code || undefined,
+                      days: v.days,
+                      limit: v.limit,
+                      expires_at: fromLocalInput(v.expires),
+                      scope: v.scope,
+                    },
+                  );
+                  setCode(result.code);
+                  await r.load();
+                  notify("saved");
+                }).then(() => undefined)
+              }
+            />
             {code && (
-              <div role="status">
-                <p>Copy now; the code is shown only once.</p>
+              <div className="card" role="status">
+                <p>{t("p_copy_now")}</p>
                 <code>{code}</code>
               </div>
             )}
-          </form>
+          </div>
           <form
             className="card form-stack"
             onSubmit={(e) => {
@@ -169,13 +343,17 @@ export function SubscriptionManager() {
               void mutate("grant", {
                 user_id: p.user_id,
                 days: Number(p.days),
+                scope: grantScope,
               });
             }}
           >
-            <h3>Manual Premium activation</h3>
+            <h3>{t("p_manual")}</h3>
             <label className="field">
-              Student
-              <select name="user_id" className="input" required>
+              {t("p_user")}
+              <select name="user_id" className="input" required defaultValue="">
+                <option value="" disabled>
+                  {t("none")}
+                </option>
                 {users.data?.map((u) => (
                   <option key={u.id} value={u.id}>
                     {String(u.display_name)} · {u.id}
@@ -184,7 +362,7 @@ export function SubscriptionManager() {
               </select>
             </label>
             <label className="field">
-              Days
+              {t("p_days")}
               <input
                 name="days"
                 type="number"
@@ -195,118 +373,146 @@ export function SubscriptionManager() {
                 required
               />
             </label>
-            <button className="button primary">Activate Premium</button>
+            <ScopePicker value={grantScope} onChange={setGrantScope} />
+            <button className="button primary">{t("p_activate")}</button>
           </form>
         </div>
-        <h3>Promo codes</h3>
-        {r.data?.codes.map((c) => (
-          <article className="card" key={c.id}>
-            <h4>{String(c.label)}</h4>
-            <p>
-              {String(c.days)} days · {String(c.used)}/{String(c.limit)} uses ·{" "}
-              {c.revoked_at ? "Revoked" : c.enabled ? "Enabled" : "Disabled"}
-            </p>
-            <div className="live-actions">
-              <button
-                className="button outline"
-                onClick={() =>
-                  void mutate("code", { id: c.id, enabled: !c.enabled })
-                }
-              >
-                Enable / Disable
-              </button>
-              <button
-                className="button outline"
-                onClick={() =>
-                  window.confirm("Revoke this promo code?") &&
-                  void mutate("code", { id: c.id, revoke: true })
-                }
-              >
-                Revoke code
-              </button>
-            </div>
-          </article>
-        ))}
-        <h3>Subscriber history</h3>
+        <h3>{t("p_codes")}</h3>
+        {!r.data?.codes.length && <p className="notice">{t("p_none")}</p>}
+        {r.data?.codes.map((c) =>
+          editing === c.id ? (
+            <PromoForm
+              key={c.id}
+              initial={c}
+              submitLabel={t("save")}
+              onCancel={() => setEditing("")}
+              onSubmit={(v) =>
+                mutate("code", {
+                  id: c.id,
+                  label: v.label,
+                  days: v.days,
+                  limit: v.limit,
+                  expires_at: fromLocalInput(v.expires),
+                  scope: v.scope,
+                })
+              }
+            />
+          ) : (
+            <article className="card" key={c.id}>
+              <h4>
+                {String(c.label)} · {t("p_state_" + codeState(c))}
+              </h4>
+              <p>
+                {String(c.days)} {t("p_days").toLowerCase()} · {t("p_used")}{" "}
+                {String(c.used)}/{String(c.limit)} · {t("p_covers")}:{" "}
+                {scopeText(c.scope)} ·{" "}
+                {c.expires_at
+                  ? t("p_until") + " " + formatDateTime(c.expires_at)
+                  : t("p_never")}
+              </p>
+              <div className="live-actions">
+                <button
+                  className="button outline"
+                  onClick={() => setEditing(String(c.id))}
+                >
+                  {t("edit")}
+                </button>
+                {!c.revoked_at && (
+                  <button
+                    className="button outline"
+                    onClick={() =>
+                      void mutate("code", { id: c.id, enabled: !c.enabled })
+                    }
+                  >
+                    {t(c.enabled ? "p_disable" : "p_enable")}
+                  </button>
+                )}
+                <button
+                  className="button outline"
+                  onClick={() =>
+                    c.revoked_at
+                      ? void mutate("code", { id: c.id, revoke: false })
+                      : window.confirm(t("p_confirm_revoke")) &&
+                        void mutate("code", { id: c.id, revoke: true })
+                  }
+                >
+                  {t(c.revoked_at ? "p_restore" : "p_revoke")}
+                </button>
+                {Number(c.used) === 0 && (
+                  <button
+                    className="button outline"
+                    onClick={() =>
+                      window.confirm(t("p_confirm_delete")) &&
+                      void mutate("code", { id: c.id, delete: true })
+                    }
+                  >
+                    {t("p_delete")}
+                  </button>
+                )}
+              </div>
+            </article>
+          ),
+        )}
+        <h3>{t("p_grants")}</h3>
         <div className="live-actions">
           <input
             className="input"
-            aria-label="Search subscribers"
-            placeholder="Name or student ID"
+            aria-label={t("p_user")}
+            placeholder={t("p_user")}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
           <select
             className="input"
-            aria-label="Subscription status"
+            aria-label={t("status")}
             value={status}
             onChange={(e) => setStatus(e.target.value)}
           >
-            {["all", "active", "expired", "revoked"].map((s) => (
-              <option key={s}>{s}</option>
+            <option value="all">{t("p_scope_all")}</option>
+            {["active", "expired", "revoked"].map((s) => (
+              <option key={s} value={s}>
+                {t("p_state_" + s)}
+              </option>
             ))}
           </select>
         </div>
         {r.data?.subscriptions
-          .filter((s) => {
-            const state = s.revoked_at
-              ? "revoked"
-              : Date.parse(String(s.expires_at)) > clock
-                ? "active"
-                : "expired";
-            return (
-              (status === "all" || status === state) &&
-              (
-                String(s.user_id) +
-                " " +
-                String(
-                  users.data?.find((u) => u.id === s.user_id)?.display_name ||
-                    "",
-                )
-              )
+          .filter(
+            (s) =>
+              (status === "all" || status === subState(s)) &&
+              (String(s.user_id) + " " + userName(s.user_id))
                 .toLowerCase()
-                .includes(search.toLowerCase())
-            );
-          })
+                .includes(search.toLowerCase()),
+          )
           .map((s) => (
             <article className="card" key={s.id}>
               <p>
-                {String(
-                  users.data?.find((u) => u.id === s.user_id)?.display_name ||
-                    s.user_id,
-                )}
+                <strong>{userName(s.user_id)}</strong> ·{" "}
+                {t("p_state_" + subState(s))}
               </p>
               <p>
-                {String(s.activated_at)} → {String(s.expires_at)} ·{" "}
-                {s.revoked_at
-                  ? "Revoked"
-                  : Date.parse(String(s.expires_at)) > clock
-                    ? "Active"
-                    : "Expired"}
+                {formatDateTime(s.activated_at)} →{" "}
+                {formatDateTime(s.expires_at)} · {t("p_covers")}:{" "}
+                {scopeText(s.scope)}
               </p>
               {!s.revoked_at && (
                 <button
                   className="button outline"
                   onClick={() =>
-                    window.confirm("Revoke this grant?") &&
+                    window.confirm(t("p_confirm_revoke")) &&
                     void mutate("revoke", { id: s.id })
                   }
                 >
-                  Revoke access
+                  {t("p_revoke")}
                 </button>
               )}
             </article>
           ))}
-        <h3>Redemption history</h3>
-        {r.data?.redemptions.map((x) => (
-          <p key={x.id}>
-            {String(x.user_id)} · {String(x.code_id)} · {String(x.redeemed_at)}
-          </p>
-        ))}
       </ResourceState>
     </section>
   );
 }
+
 export function PremiumLock() {
   const { t } = useApp();
   return (

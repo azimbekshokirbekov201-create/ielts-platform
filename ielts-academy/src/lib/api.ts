@@ -2,9 +2,16 @@ export class RequestError extends Error {
   constructor(
     public code: string,
     public status: number,
+    public detail?: string,
   ) {
     super(code);
   }
+}
+/** Notice text for the UI: "code" or "code::detail" (see describeNotice). */
+export function noticeOf(e: unknown) {
+  return e instanceof RequestError
+    ? e.code + (e.detail ? "::" + e.detail : "")
+    : "server_error";
 }
 export async function api<T>(
   path: string,
@@ -25,9 +32,18 @@ export async function api<T>(
           ? body
           : JSON.stringify(body),
   });
-  const json = await response.json();
+  let json: { data?: unknown; error?: string; detail?: string } = {};
+  try {
+    json = await response.json();
+  } catch {
+    if (!response.ok) throw new RequestError("server_error", response.status);
+  }
   if (!response.ok)
-    throw new RequestError(json.error || "server_error", response.status);
+    throw new RequestError(
+      json.error || "server_error",
+      response.status,
+      json.detail,
+    );
   return json.data as T;
 }
 export type Row = { id: string; title?: string; [key: string]: unknown };

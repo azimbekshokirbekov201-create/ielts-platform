@@ -3,6 +3,7 @@ import { z } from "zod";
 export const uuid = z.uuid();
 const title = z.string().trim().min(1).max(200);
 const text = z.string().max(50000);
+const longTitle = z.string().trim().min(1).max(2000);
 const status = z.enum(["draft", "published", "archived"]);
 const urlOrPath = z
   .string()
@@ -65,7 +66,7 @@ export const contentSchemas = {
   }),
   questions: z.object({
     section_id: uuid,
-    prompt: title,
+    prompt: longTitle,
     kind: z.enum([
       "text",
       "choice",
@@ -78,7 +79,11 @@ export const contentSchemas = {
     max_words: z.number().int().min(1).nullable().optional(),
     points: z.number().int().min(1).max(10).default(1),
   }),
-  question_options: z.object({ question_id: uuid, label: title, value: title }),
+  question_options: z.object({
+    question_id: uuid,
+    label: z.string().trim().min(1).max(1000),
+    value: title,
+  }),
   answer_keys: z.object({
     question_id: uuid,
     accepted: z.array(title).min(1),

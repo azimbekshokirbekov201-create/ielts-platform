@@ -6,8 +6,8 @@ import {
   useEffect,
   useCallback,
 } from "react";
-import { api, RequestError, type Me } from "@/lib/api";
-import { type Language } from "@/lib/i18n";
+import { api, noticeOf, type Me } from "@/lib/api";
+import { type Language, translationKeys } from "@/lib/i18n";
 type Context = {
   me: Me | null;
   lang: Language;
@@ -20,6 +20,34 @@ type Context = {
   run: <T>(job: () => Promise<T>) => Promise<T | undefined>;
 };
 export const AcademyContext = createContext<Context>(null!);
+/**
+ * Turns "code" or "code::detail" into readable text. The detail is either
+ * "fields:a,b" (invalid fields) or "reason_x[:extra]" (a business rule); when the
+ * detail can be explained it replaces the generic message.
+ */
+export function describeNotice(t: (k: string) => string, notice: string) {
+  const at = notice.indexOf("::");
+  const code = at < 0 ? notice : notice.slice(0, at);
+  const detail = at < 0 ? "" : notice.slice(at + 2);
+  const label = (k: string) => (translationKeys.includes(k) ? t(k) : k);
+  if (detail.startsWith("fields:"))
+    return (
+      t("check_fields") +
+      ": " +
+      detail
+        .slice(7)
+        .split(",")
+        .map((f) => label(f))
+        .join(", ")
+    );
+  const colon = detail.indexOf(":");
+  const reason = colon < 0 ? detail : detail.slice(0, colon);
+  if (reason && translationKeys.includes(reason)) {
+    const extra = colon < 0 ? "" : detail.slice(colon + 1).trim();
+    return t(reason) + (extra ? ": " + label(extra) : "");
+  }
+  return t(code);
+}
 export const useApp = () => useContext(AcademyContext);
 export function useResource<T>(path: string) {
   const [data, setData] = useState<T | null>(null),
@@ -31,7 +59,7 @@ export function useResource<T>(path: string) {
     try {
       setData(await api<T>(path));
     } catch (e) {
-      setError(e instanceof RequestError ? e.code : "server_error");
+      setError(noticeOf(e));
     } finally {
       setLoading(false);
     }
@@ -55,7 +83,7 @@ export function ResourceState({
   if (error)
     return (
       <p className="notice" role="alert">
-        {t(error)}
+        {describeNotice(t, error)}
       </p>
     );
   return <>{children}</>;

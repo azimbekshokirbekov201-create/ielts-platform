@@ -3,10 +3,12 @@ import { randomUUID } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { prisma } from "./database";
 import { onboardingSchema, contentSchemas } from "../validation";
+import { defaultBand } from "@/lib/grading";
 export class ApiError extends Error {
   constructor(
     public status: number,
     public code: string,
+    public detail?: string,
   ) {
     super(code);
   }
@@ -74,13 +76,52 @@ export class Store {
     if (!r || r.user_id !== this.uid) throw new ApiError(403, "forbidden");
     return r;
   }
-  async premium() {
-    return (await this.all("subscriptions")).some(
+  async settings(): Promise<Row> {
+    return (await this.get("platform_settings", "true")) || {};
+  }
+  /** Which subscription scope category a piece of content belongs to. */
+  category(kind: string, r: Row): string | null {
+    if (kind === "tests")
+      return r.skill === "listening" ? "listening" : "reading";
+    if (kind === "writing_tasks") return "writing";
+    if (kind === "speaking_tasks") return "speaking";
+    if (kind === "mock_exams") return "mock";
+    if (kind === "courses" || kind === "lessons") return "courses";
+    return null;
+  }
+  /** Effective access tier. With the paywall on, only content explicitly marked free stays free. */
+  async tier(kind: string, r: Row): Promise<"free" | "premium"> {
+    let tier = r.access_tier;
+    if (kind === "lessons" && !tier) {
+      const m = await this.get("course_modules", r.module_id);
+      tier = m && (await this.get("courses", m.course_id))?.access_tier;
+    }
+    if ((await this.settings()).paywall_enabled)
+      return tier === "free" ? "free" : "premium";
+    return tier === "premium" ? "premium" : "free";
+  }
+  async activeSubscriptions() {
+    return (await this.all("subscriptions")).filter(
       (x) =>
         x.user_id === this.uid &&
         !x.revoked_at &&
         Date.parse(x.activated_at) <= Date.now() &&
         Date.parse(x.expires_at) > Date.now(),
+    );
+  }
+  /** True when the user has an active subscription (covering this content, if given). */
+  async premium(kind?: string, r?: Row) {
+    const subs = await this.activeSubscriptions();
+    if (!subs.length) return false;
+    if (!kind || !r) return true;
+    const category = this.category(kind, r);
+    return subs.some(
+      (x) => !x.scope?.length || (!!category && x.scope.includes(category)),
+    );
+  }
+  async allowed(kind: string, r: Row) {
+    return (
+      (await this.tier(kind, r)) !== "premium" || (await this.premium(kind, r))
     );
   }
   async editor(kind: string, r: Row): Promise<boolean> {
@@ -125,15 +166,12 @@ export class Store {
         "mock_exams",
       ].includes(kind)
     )
-      return (
-        r.status === "published" &&
-        (r.access_tier !== "premium" || (await this.premium()))
-      );
+      return r.status === "published" && (await this.allowed(kind, r));
     if (kind === "course_modules") return this.parent("courses", r.course_id);
     if (kind === "lessons")
       return (
         r.status === "published" &&
-        (r.access_tier !== "premium" || (await this.premium())) &&
+        (await this.allowed("lessons", r)) &&
         (await this.parent("course_modules", r.module_id))
       );
     if (kind === "lesson_resources") return this.parent("lessons", r.lesson_id);
@@ -180,7 +218,7 @@ export class Store {
   async published(kind: string, id: string) {
     const row = await this.get(kind, id);
     if (!row || !(await this.visible(kind, row)) || row.status !== "published")
-      throw new ApiError(409, "operation_rejected");
+      throw new ApiError(409, "operation_rejected", "reason_not_published");
     return row;
   }
   async activity(kind: string, id: string) {
@@ -266,7 +304,11 @@ export class Store {
       };
       for (const [field, target] of Object.entries(refs))
         if (row[field] && !(await this.get(target, row[field])))
-          throw new ApiError(409, "operation_rejected");
+          throw new ApiError(
+            409,
+            "operation_rejected",
+            "reason_missing_parent",
+          );
       const testFor = async (value: Row) => {
         if (kind === "tests") return value.id;
         if (kind === "test_sections") return value.test_id;
@@ -318,7 +360,11 @@ export class Store {
               JSON.stringify(input[k]) !== JSON.stringify(existing?.[k]),
           )
         )
-          throw new ApiError(409, "operation_rejected");
+          throw new ApiError(
+            409,
+            "operation_rejected",
+            "reason_in_use_attempts",
+          );
       }
       if (
         kind === "answer_keys" &&
@@ -326,24 +372,25 @@ export class Store {
           (x) => x.question_id === row.question_id && x.id !== existing?.id,
         )
       )
-        throw new ApiError(409, "operation_rejected");
+        throw new ApiError(409, "operation_rejected", "reason_duplicate_key");
       if (kind === "mock_exam_sections") {
         const targets = [
           row.test_id,
           row.writing_task_id,
           row.speaking_task_id,
         ].filter(Boolean);
-        if (targets.length !== 1) throw new ApiError(409, "operation_rejected");
+        if (targets.length !== 1)
+          throw new ApiError(409, "operation_rejected", "reason_mock_target");
         if (row.test_id) {
           const test = await this.get("tests", row.test_id);
           if (test?.skill !== row.skill)
-            throw new ApiError(409, "operation_rejected");
+            throw new ApiError(409, "operation_rejected", "reason_mock_skill");
         } else if (
           row.writing_task_id
             ? row.skill !== "writing"
             : row.skill !== "speaking"
         )
-          throw new ApiError(409, "operation_rejected");
+          throw new ApiError(409, "operation_rejected", "reason_mock_skill");
         if (
           (await this.all(kind)).some(
             (x) =>
@@ -352,7 +399,7 @@ export class Store {
               x.id !== existing?.id,
           )
         )
-          throw new ApiError(409, "operation_rejected");
+          throw new ApiError(409, "operation_rejected", "reason_mock_position");
       }
       if (kind === "tests" && row.status === "published") {
         const sections = (await this.all("test_sections"))
@@ -361,19 +408,28 @@ export class Store {
         const questions = (await this.all("questions")).filter((x) =>
           sections.includes(x.section_id),
         );
-        if (!questions.length) throw new ApiError(409, "operation_rejected");
-        for (const q of questions)
-          if (
-            !(await this.all("answer_keys")).some((x) => x.question_id === q.id)
-          )
-            throw new ApiError(409, "operation_rejected");
+        if (!questions.length)
+          throw new ApiError(409, "operation_rejected", "reason_no_questions");
+        const keyed = new Set(
+          (await this.all("answer_keys")).map((x) => x.question_id),
+        );
+        const missing = questions.filter((q) => !keyed.has(q.id));
+        if (missing.length)
+          throw new ApiError(
+            409,
+            "operation_rejected",
+            "reason_missing_key:" +
+              missing.length +
+              " · " +
+              String(missing[0].prompt).replace(/:/g, " ").slice(0, 60),
+          );
       }
       if (kind === "mock_exams" && row.status === "published") {
         const sections = (await this.all("mock_exam_sections")).filter(
           (x) => x.mock_exam_id === row.id,
         );
         if (new Set(sections.map((x) => x.skill)).size !== 4)
-          throw new ApiError(409, "operation_rejected");
+          throw new ApiError(409, "operation_rejected", "reason_mock_four");
         for (const x of sections)
           await this.published(
             x.test_id
@@ -404,14 +460,20 @@ export class Store {
     }
     if (mode === "delete") {
       // Restrict deletes with references instead of orphaning history.
+      // The audit trail records every row it ever touched; history must not block deletes.
       for (const x of await this.db.entity.findMany())
         if (
+          x.kind !== "audit_logs" &&
           x.id !== row.id &&
           Object.entries(x.data as Row).some(
             ([k, v]) => k.endsWith("_id") && v === row.id,
           )
         )
-          throw new ApiError(409, "operation_rejected");
+          throw new ApiError(
+            409,
+            "operation_rejected",
+            "reason_in_use:" + x.kind,
+          );
       await this.db.entity.delete({
         where: { kind_id: { kind, id: existing!.id } },
       });
@@ -450,10 +512,11 @@ export class Store {
       const kind = name === "writing_draft" ? "writing_tasks" : "tests";
       const item = await this.get(kind, work?.task_id || work?.test_id || p.t);
       if (
-        item?.access_tier === "premium" &&
+        item &&
+        (await this.tier(kind, item)) === "premium" &&
         !(await this.admin()) &&
         !(await this.editor(kind, item)) &&
-        !(await this.premium())
+        !(await this.premium(kind, item))
       )
         throw new ApiError(403, "premium_required");
     }
@@ -567,7 +630,9 @@ export class Store {
         submitted_at: now,
         raw_score: raw,
         total_points: total,
-        band: bands.length ? Math.max(...bands) : null,
+        band: bands.length
+          ? Math.max(...bands)
+          : defaultBand(test?.skill, test?.variant, raw, total),
       });
     }
     if (name === "writing_draft") {

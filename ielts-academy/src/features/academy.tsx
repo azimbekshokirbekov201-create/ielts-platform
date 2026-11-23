@@ -7,7 +7,7 @@ import { SkillProgressChart } from "@/components/charts/skill-chart";
 import { learningScores } from "./premium-ui";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
-import { api, RequestError, type Me, type Row } from "@/lib/api";
+import { api, noticeOf, type Me, type Row } from "@/lib/api";
 import { translate, type Language } from "@/lib/i18n";
 import {
   AcademyContext,
@@ -15,6 +15,7 @@ import {
   useResource,
   ResourceState,
   Empty,
+  describeNotice,
 } from "./academy-context";
 export function AcademyProvider({
   route,
@@ -40,7 +41,7 @@ export function AcademyProvider({
       setError("");
     } catch (e) {
       setMe(null);
-      setError(e instanceof RequestError ? e.code : "server_error");
+      setError(noticeOf(e));
     } finally {
       setLoading(false);
     }
@@ -85,7 +86,7 @@ export function AcademyProvider({
       try {
         await api("preferences", "PATCH", { language: l });
       } catch (e) {
-        setNotice(e instanceof RequestError ? e.code : "server_error");
+        setNotice(noticeOf(e));
       }
   }
   const run = useCallback(
@@ -94,7 +95,7 @@ export function AcademyProvider({
       try {
         return await job();
       } catch (e) {
-        setNotice(e instanceof RequestError ? e.code : "server_error");
+        setNotice(noticeOf(e));
         return undefined;
       }
     },
@@ -132,7 +133,7 @@ export function AcademyProvider({
           className="live-toast"
           role={notice === "saved" ? "status" : "alert"}
         >
-          <span>{t(notice)}</span>
+          <span>{describeNotice(t, notice)}</span>
           <button aria-label={t("back")} onClick={() => setNotice("")}>
             ×
           </button>

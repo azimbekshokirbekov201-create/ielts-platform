@@ -4,6 +4,24 @@ import { resolve } from "node:path";
 import { z } from "zod";
 import { prisma } from "./local/database";
 import { Store, ApiError } from "./local/engine";
+export const scopeCategories = [
+  "listening",
+  "reading",
+  "writing",
+  "speaking",
+  "courses",
+  "mock",
+] as const;
+const scopeSchema = z
+  .array(z.enum(scopeCategories))
+  .max(scopeCategories.length)
+  .nullable()
+  .optional();
+/** An empty or missing scope means "everything". */
+const normalizeScope = (scope?: readonly string[] | null) =>
+  scope?.length ? [...new Set(scope)].sort() : null;
+const scopeKey = (scope?: readonly string[] | null) =>
+  (scope?.length ? [...scope].sort() : []).join(",");
 function digest(code: string) {
   const dir = resolve(process.env.PRIVATE_UPLOAD_DIR || "private-uploads");
   mkdirSync(dir, { recursive: true });
@@ -22,16 +40,24 @@ export async function grant(
   uid: string,
   days: number,
   source: string,
+  scope: readonly string[] | null = null,
 ) {
   if (!(await s.get("profiles", uid))) throw new ApiError(404, "not_found");
+  // Grants only stack with earlier grants that unlock exactly the same content.
   const current = (await s.all("subscriptions"))
-    .filter((x) => x.user_id === uid && !x.revoked_at)
+    .filter(
+      (x) =>
+        x.user_id === uid &&
+        !x.revoked_at &&
+        scopeKey(x.scope) === scopeKey(scope),
+    )
     .reduce((n, x) => Math.max(n, Date.parse(x.expires_at)), Date.now());
   const row = await s.add("subscriptions", {
     user_id: uid,
     activated_at: new Date().toISOString(),
     expires_at: new Date(current + days * 86400000).toISOString(),
     source,
+    scope: normalizeScope(scope),
     revoked_at: null,
   });
   await s.audit("grant_premium", "subscriptions", row.id);
@@ -54,6 +80,12 @@ export async function subscriptionRequest(
       .sort((a, b) => b.expires_at.localeCompare(a.expires_at));
     return {
       tier: active.length ? "premium" : "free",
+      // null = everything; otherwise the categories the active access covers.
+      scope: !active.length
+        ? []
+        : active.some((x) => !x.scope?.length)
+          ? null
+          : [...new Set(active.flatMap((x) => x.scope as string[]))].sort(),
       activated_at: active[0]?.activated_at || null,
       expires_at: active[0]?.expires_at || null,
       remaining_days: active.length
@@ -78,7 +110,12 @@ export async function subscriptionRequest(
   }
   const body = await req.text();
   if (body.length > 10000) throw new ApiError(413, "too_large");
-  const p = JSON.parse(body);
+  let p;
+  try {
+    p = JSON.parse(body);
+  } catch {
+    throw new ApiError(400, "invalid_input");
+  }
   if (key === "subscription/redeem") {
     const allowed = await prisma.$transaction((tx) =>
       new Store(tx, uid, true).rpc("consume_rate_limit", {
@@ -125,7 +162,7 @@ export async function subscriptionRequest(
               (await s.get("promo_redemptions", uid + ":" + c.id))
             )
               throw new ApiError(409, "promo_unavailable");
-            const sub = await grant(s, uid, c.days, "promo:" + c.id);
+            const sub = await grant(s, uid, c.days, "promo:" + c.id, c.scope);
             await s.put("promo_redemptions", {
               id: uid + ":" + c.id,
               user_id: uid,
@@ -150,6 +187,7 @@ export async function subscriptionRequest(
                 days: z.number().int().min(1).max(3650),
                 limit: z.number().int().min(1).max(100000),
                 expires_at: z.iso.datetime().nullable().optional(),
+                scope: scopeSchema,
               })
               .parse(p);
             const code = (
@@ -163,6 +201,7 @@ export async function subscriptionRequest(
               days: input.days,
               limit: input.limit,
               expires_at: input.expires_at || null,
+              scope: normalizeScope(input.scope),
               lookup,
               used: 0,
               enabled: true,
@@ -176,9 +215,16 @@ export async function subscriptionRequest(
               .object({
                 user_id: z.uuid(),
                 days: z.number().int().min(1).max(3650),
+                scope: scopeSchema,
               })
               .parse(p);
-            return grant(s, input.user_id, input.days, "manual:" + uid);
+            return grant(
+              s,
+              input.user_id,
+              input.days,
+              "manual:" + uid,
+              input.scope,
+            );
           }
           if (key === "admin/subscriptions/revoke") {
             const { id } = z.object({ id: z.uuid() }).parse(p);
@@ -193,15 +239,57 @@ export async function subscriptionRequest(
               .object({
                 id: z.uuid(),
                 enabled: z.boolean().optional(),
+                // true revokes the code, false restores a revoked code
                 revoke: z.boolean().optional(),
+                label: z.string().trim().min(1).max(100).optional(),
+                days: z.number().int().min(1).max(3650).optional(),
+                limit: z.number().int().min(1).max(100000).optional(),
+                expires_at: z.iso.datetime().nullable().optional(),
+                scope: scopeSchema,
+                delete: z.boolean().optional(),
               })
               .parse(p);
             const c = await s.get("promo_codes", input.id);
             if (!c) throw new ApiError(404, "not_found");
+            if (input.delete) {
+              if (c.used > 0)
+                throw new ApiError(
+                  409,
+                  "operation_rejected",
+                  "reason_code_used",
+                );
+              await tx.entity.delete({
+                where: { kind_id: { kind: "promo_codes", id: c.id } },
+              });
+              await s.audit("delete_promo", "promo_codes", c.id);
+              return true;
+            }
+            if (input.limit !== undefined && input.limit < c.used)
+              throw new ApiError(
+                409,
+                "operation_rejected",
+                "reason_limit_below_used",
+              );
             await s.put("promo_codes", {
               ...c,
               enabled: input.enabled ?? c.enabled,
-              revoked_at: input.revoke ? now : c.revoked_at,
+              revoked_at:
+                input.revoke === undefined
+                  ? c.revoked_at
+                  : input.revoke
+                    ? now
+                    : null,
+              label: input.label ?? c.label,
+              days: input.days ?? c.days,
+              limit: input.limit ?? c.limit,
+              expires_at:
+                input.expires_at === undefined
+                  ? c.expires_at
+                  : input.expires_at,
+              scope:
+                input.scope === undefined
+                  ? (c.scope ?? null)
+                  : normalizeScope(input.scope),
             });
             await s.audit("update_promo", "promo_codes", c.id);
             return true;

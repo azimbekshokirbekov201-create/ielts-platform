@@ -3,8 +3,11 @@ import { RichEditor } from "./rich-text";
 import { FileUpload } from "./file-upload";
 import { SubscriptionManager } from "./subscriptions";
 import { learningSkills } from "./premium-ui";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api, type Row } from "@/lib/api";
+import { fromLocalInput, toLocalInput } from "@/lib/dates";
+import { CourseBuilder } from "./course-builder";
+import { ImportPanel } from "./html-import-panel";
 import { uploadMedia } from "@/lib/media-upload";
 import {
   useApp,
@@ -124,7 +127,7 @@ for (const key of [
   "speaking_tasks",
   "mock_exams",
 ])
-  templates[key].access_tier = "free";
+  templates[key].access_tier = "premium";
 enums.access_tier = ["free", "premium"];
 export function ContentStudio({ teacher = false }: { teacher?: boolean }) {
   const { t } = useApp();
@@ -157,19 +160,37 @@ export function ContentStudio({ teacher = false }: { teacher?: boolean }) {
       )}
       <div className="live-actions">
         {(teacher
-          ? ["content"]
-          : ["content", "users", "subscriptions", "settings", "audit"]
+          ? ["content", "courses", "import"]
+          : [
+              "content",
+              "courses",
+              "import",
+              "users",
+              "subscriptions",
+              "settings",
+              "audit",
+            ]
         ).map((k) => (
           <button
             key={k}
             className={"button " + (tab === k ? "primary" : "outline")}
             onClick={() => setTab(k)}
           >
-            {t(k)}
+            {t(
+              k === "courses"
+                ? "course_builder"
+                : k === "import"
+                  ? "import_html"
+                  : k,
+            )}
           </button>
         ))}
       </div>
-      {tab === "content" ? (
+      {tab === "courses" ? (
+        <CourseBuilder />
+      ) : tab === "import" ? (
+        <ImportPanel onOpenContent={() => setTab("content")} />
+      ) : tab === "content" ? (
         <ContentEditor />
       ) : tab === "subscriptions" ? (
         <SubscriptionManager />
@@ -200,18 +221,32 @@ function ContentEditor() {
   );
   useEffect(() => {
     let alive = true;
+    const parents: Record<string, string[]> = {
+      course_modules: ["courses"],
+      lessons: ["course_modules", "courses"],
+      test_sections: ["tests"],
+      questions: ["test_sections", "tests"],
+    };
+    const direct = Object.keys(templates[table])
+      .filter((k) => refs[k])
+      .map((k) => refs[k]);
     const tables = [
-      ...new Set(
-        Object.keys(templates[table])
-          .filter((k) => refs[k])
-          .map((k) => refs[k]),
-      ),
+      ...new Set([...direct, ...direct.flatMap((n) => parents[n] || [])]),
     ];
+    // Load every page so dropdowns never silently stop at the first 100 rows.
+    const loadAll = async (name: string) => {
+      const out: Row[] = [];
+      for (let p = 0; p < 30; p++) {
+        const rows = await api<Row[]>(
+          "admin/content/" + name + (p ? "?page=" + p : ""),
+        );
+        out.push(...rows);
+        if (rows.length < 100) break;
+      }
+      return out;
+    };
     void Promise.all(
-      tables.map(
-        async (name) =>
-          [name, await api<Row[]>("admin/content/" + name)] as const,
-      ),
+      tables.map(async (name) => [name, await loadAll(name)] as const),
     )
       .then((rows) => {
         if (alive) setChoices(Object.fromEntries(rows));
@@ -221,9 +256,42 @@ function ContentEditor() {
       alive = false;
     };
   }, [table, r.data]);
+  const find = (name: string, id: unknown) =>
+    choices[name]?.find((x) => x.id === id);
+  // "Course › Module › Lesson" so identical names in different parents can be told apart.
+  function optionLabel(name: string, row: Row): string {
+    const title = String(row.title || row.prompt || row.id).slice(0, 80);
+    const up = (parent: string, id: unknown) => {
+      const p = find(parent, id);
+      return p ? optionLabel(parent, p) + " › " : "";
+    };
+    if (name === "course_modules") return up("courses", row.course_id) + title;
+    if (name === "lessons") return up("course_modules", row.module_id) + title;
+    if (name === "test_sections") return up("tests", row.test_id) + title;
+    if (name === "questions")
+      return up("test_sections", row.section_id) + title;
+    return title;
+  }
+  const rowTitle = (row: Row) => {
+    const q = row.question_id ? find("questions", row.question_id) : undefined;
+    return String(
+      row.title ||
+        row.prompt ||
+        row.label ||
+        (q ? optionLabel("questions", q) : "") ||
+        row.question_id,
+    );
+  };
+  const blank = (target: string, forSkill = skill) => ({
+    ...templates[target],
+    ...(target === "tests" && forSkill ? { skill: forSkill } : {}),
+  });
+  const baseline = useRef("");
   const [autosave, setAutosave] = useState("");
   useEffect(() => {
     if (!editing || editing.status !== "draft") return;
+    // Opening a draft must not write it back; only real edits are autosaved.
+    if (JSON.stringify(values) === baseline.current) return;
     const timer = setTimeout(() => {
       const payload = { ...values };
       if (typeof payload.accepted === "string")
@@ -237,27 +305,31 @@ function ContentEditor() {
           return;
         }
       }
-      setAutosave("Saving…");
+      setAutosave(t("saving"));
       void api(
         "admin/content/" + table + "/" + (editing.id || editing.question_id),
         "PATCH",
         payload,
       )
-        .then(() => setAutosave("Draft saved"))
-        .catch(() => setAutosave("Save all required fields to continue."));
+        .then(() => {
+          baseline.current = JSON.stringify(values);
+          setAutosave(t("saved"));
+        })
+        .catch(() => setAutosave(t("autosave_failed")));
     }, 1500);
     return () => clearTimeout(timer);
-  }, [values, editing, table]);
+  }, [values, editing, table, t]);
   function edit(row: Row) {
-    setEditing(row);
-    setValues(
-      Object.fromEntries(
-        Object.keys(templates[table]).map((k) => [
-          k,
-          row[k] ?? templates[table][k],
-        ]),
-      ),
+    const next = Object.fromEntries(
+      Object.keys(templates[table]).map((k) => [
+        k,
+        row[k] ?? templates[table][k],
+      ]),
     );
+    baseline.current = JSON.stringify(next);
+    setAutosave("");
+    setEditing(row);
+    setValues(next);
   }
   function change(k: string, v: unknown) {
     setValues((a) => ({ ...a, [k]: v }));
@@ -341,26 +413,28 @@ function ContentEditor() {
                 ?.scrollIntoView({ behavior: "smooth" });
             }}
           >
-            + Add Test
+            + {t("create")}
           </button>
         </div>
       )}
       <div className="live-actions">
         <input
           className="input"
-          placeholder="Search content"
-          aria-label="Search content"
+          placeholder={t("search_content")}
+          aria-label={t("search_content")}
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
         <select
           className="input"
-          aria-label="Filter status"
+          aria-label={t("status")}
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
         >
           {["all", "draft", "published", "archived"].map((x) => (
-            <option key={x}>{x}</option>
+            <option key={x} value={x}>
+              {t(x === "all" ? "all_items" : x)}
+            </option>
           ))}
         </select>
       </div>
@@ -370,6 +444,8 @@ function ContentEditor() {
           className="input"
           value={table}
           onChange={(e) => {
+            // Leaving the skill shortcut also clears its filter, otherwise new rows seem to vanish.
+            setSkill("");
             setTable(e.target.value);
             setPage(0);
             setEditing(null);
@@ -418,7 +494,7 @@ function ContentEditor() {
               );
               notify("saved");
               setEditing(null);
-              setValues(templates[table]);
+              setValues(blank(table));
               await r.load();
             }).finally(() => setBusy(false));
           }}
@@ -436,13 +512,31 @@ function ContentEditor() {
                 table !== "tests" ||
                 ["listening", "reading"].includes(v),
             );
+            // Rich editors and uploads hold buttons: a <label> would forward label clicks to the first one.
+            const Wrap =
+              ["prompt", "body", "description"].includes(key) ||
+              [
+                "audio_path",
+                "image_path",
+                "attachment_path",
+                "media_path",
+                "storage_path",
+                "video_url",
+              ].includes(key)
+                ? "div"
+                : "label";
             return (
-              <label className="field" key={key}>
+              <Wrap className="field" key={key}>
                 {t(key)}
                 {["prompt", "body", "description"].includes(key) ? (
                   <RichEditor
                     label={t(key)}
                     value={String(value || "")}
+                    required={
+                      key === "prompt" ||
+                      (key === "body" && table === "passages")
+                    }
+                    maxLength={table === "questions" ? 2000 : 50000}
                     onChange={(v) => change(key, v)}
                   />
                 ) : [
@@ -479,7 +573,7 @@ function ContentEditor() {
                     <option value="">{t("none")}</option>
                     {(choices[fk] || []).map((row) => (
                       <option key={row.id} value={row.id}>
-                        {String(row.title || row.prompt || row.id)}
+                        {optionLabel(fk, row)}
                       </option>
                     ))}
                   </select>
@@ -518,7 +612,7 @@ function ContentEditor() {
                           ? value
                           : JSON.stringify(value)
                     }
-                    placeholder='[{"min":0,"band":0}]'
+                    placeholder={t("band_default_hint")}
                     onChange={(e) => change(key, e.target.value)}
                   />
                 ) : ["body", "description", "prompt", "explanation"].includes(
@@ -548,7 +642,7 @@ function ContentEditor() {
                     min={numbers.includes(key) ? 0 : undefined}
                     value={
                       key.startsWith("available_")
-                        ? String(value || "").slice(0, 16)
+                        ? toLocalInput(value)
                         : String(value ?? "")
                     }
                     onChange={(e) =>
@@ -560,7 +654,7 @@ function ContentEditor() {
                             : Number(e.target.value)
                           : key.startsWith("available_")
                             ? e.target.value
-                              ? new Date(e.target.value + "Z").toISOString()
+                              ? fromLocalInput(e.target.value)
                               : null
                             : e.target.value || defaultValue === null
                               ? e.target.value
@@ -569,7 +663,7 @@ function ContentEditor() {
                     }
                   />
                 )}
-              </label>
+              </Wrap>
             );
           })}
           <button className="button primary" disabled={busy}>
@@ -581,7 +675,7 @@ function ContentEditor() {
               className="button outline"
               onClick={() => {
                 setEditing(null);
-                setValues(templates[table]);
+                setValues(blank(table));
               }}
             >
               {t("back")}
@@ -609,11 +703,7 @@ function ContentEditor() {
                     className="card"
                     key={String(row.id || row.question_id || i)}
                   >
-                    <h3>
-                      {String(
-                        row.title || row.prompt || row.label || row.question_id,
-                      )}
-                    </h3>
+                    <h3>{rowTitle(row)}</h3>
                     <code>{String(row.id || row.question_id)}</code>
                     {!!row.status && (
                       <span className="badge">{t(String(row.status))}</span>
@@ -629,7 +719,7 @@ function ContentEditor() {
                         className="button outline"
                         onClick={() => void mutate(row, "duplicate")}
                       >
-                        Duplicate
+                        {t("duplicate")}
                       </button>
                       <button
                         className="button outline"
@@ -894,13 +984,18 @@ function AISettings() {
       {r.data && (
         <form
           className="card form-stack"
-          key={String(r.data.ai_enabled) + r.data.ai_daily_user_limit}
+          key={
+            String(r.data.ai_enabled) +
+            r.data.ai_daily_user_limit +
+            String(r.data.paywall_enabled)
+          }
           onSubmit={(e) => {
             e.preventDefault();
             const f = new FormData(e.currentTarget);
             void run(async () => {
               await api("admin/settings", "PATCH", {
                 ai_enabled: f.get("ai_enabled") === "on",
+                paywall_enabled: f.get("paywall_enabled") === "on",
                 ai_daily_user_limit: Number(f.get("ai_daily_user_limit")),
                 ai_daily_platform_limit: Number(
                   f.get("ai_daily_platform_limit"),
@@ -911,6 +1006,15 @@ function AISettings() {
             });
           }}
         >
+          <label className="live-check">
+            <input
+              type="checkbox"
+              name="paywall_enabled"
+              defaultChecked={!!r.data.paywall_enabled}
+            />
+            {t("paywall_enabled")}
+          </label>
+          <p className="muted">{t("paywall_hint")}</p>
           <label className="live-check">
             <input
               type="checkbox"
@@ -935,6 +1039,31 @@ function AISettings() {
           <button className="button primary">{t("save")}</button>
         </form>
       )}
+      <div className="card form-stack">
+        <h3>{t("bulk_title")}</h3>
+        <div className="live-actions">
+          {(["free", "premium"] as const).map((tier) => (
+            <button
+              key={tier}
+              className="button outline"
+              onClick={() =>
+                window.confirm(t("bulk_confirm")) &&
+                void run(async () => {
+                  const done = await api<{ changed: number }>(
+                    "admin/content-tier",
+                    "POST",
+                    { tier },
+                  );
+                  notify("saved");
+                  window.alert(t("bulk_done") + ": " + done.changed);
+                })
+              }
+            >
+              {t("bulk_" + tier)}
+            </button>
+          ))}
+        </div>
+      </div>
     </ResourceState>
   );
 }

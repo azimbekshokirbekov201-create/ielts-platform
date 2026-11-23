@@ -17,13 +17,15 @@ import {
 } from "@/server/validation";
 import { matchesFileType } from "@/server/uploads";
 import { evaluateAi } from "@/server/ai";
+import { importHtmlTest } from "@/server/html-import";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 const result = (data: unknown, status = 200) =>
   Response.json({ data }, { status, headers: { "Cache-Control": "no-store" } });
 function checked<T>(r: { data?: T; error: unknown }): T {
   if (r.error) {
-    if (r.error instanceof ApiError) throw r.error;
+    if (r.error instanceof ApiError || r.error instanceof z.ZodError)
+      throw r.error;
     throw new ApiError(409, "operation_rejected");
   }
   return r.data as T;
@@ -264,7 +266,7 @@ async function handler(
       const output = [];
       for (const row of selected) {
         if (await store.visible(path[1], row)) output.push(row);
-        else if (row.access_tier === "premium")
+        else if ((await store.tier(path[1], row)) === "premium")
           output.push({
             id: row.id,
             title: row.title,
@@ -755,8 +757,57 @@ async function handler(
       }
     }
     if (path[0] === "admin") {
-      if (path[1] === "content") teacher();
+      if (path[1] === "content" || path[1] === "import-html") teacher();
       else admin();
+      if (key === "admin/import-html" && method === "POST") {
+        const raw = await req.text();
+        if (raw.length > 9_000_000) throw new ApiError(413, "too_large");
+        let body: unknown;
+        try {
+          body = JSON.parse(raw);
+        } catch {
+          throw new ApiError(400, "invalid_input");
+        }
+        const p = z
+          .object({
+            html: z.string().min(20).max(8_000_000),
+            title: z.string().trim().min(1).max(200),
+            skill: z.enum(["reading", "listening"]).optional(),
+            variant: z.enum(["academic", "general"]).default("academic"),
+            access_tier: z.enum(["free", "premium"]).default("premium"),
+            dry_run: z.boolean().default(false),
+          })
+          .parse(body);
+        return result(await importHtmlTest(user.id, p));
+      }
+      if (key === "admin/content-tier" && method === "POST") {
+        const { tier } = z
+          .object({ tier: z.enum(["free", "premium"]) })
+          .parse(await input(req));
+        const changed = await prisma.$transaction(
+          async (tx) => {
+            const s = new Store(tx, user.id);
+            let n = 0;
+            for (const kind of [
+              "courses",
+              "lessons",
+              "tests",
+              "writing_tasks",
+              "speaking_tasks",
+              "mock_exams",
+            ])
+              for (const row of await s.all(kind)) {
+                if (row.access_tier === tier) continue;
+                await s.put(kind, { ...row, access_tier: tier });
+                n++;
+              }
+            await s.audit("bulk_access_tier", "content", tier);
+            return n;
+          },
+          { timeout: 60000 },
+        );
+        return result({ changed });
+      }
       if (key === "admin/stats" && method === "GET")
         return result(checked(await db.rpc("admin_statistics")));
       if (key === "admin/users" && method === "GET")
@@ -815,9 +866,15 @@ async function handler(
         if (method === "PATCH") {
           const p = z
             .object({
-              ai_enabled: z.boolean(),
-              ai_daily_user_limit: z.number().int().min(0).max(100),
-              ai_daily_platform_limit: z.number().int().min(0).max(10000),
+              ai_enabled: z.boolean().optional(),
+              ai_daily_user_limit: z.number().int().min(0).max(100).optional(),
+              ai_daily_platform_limit: z
+                .number()
+                .int()
+                .min(0)
+                .max(10000)
+                .optional(),
+              paywall_enabled: z.boolean().optional(),
             })
             .parse(await input(req));
           return result(
@@ -970,8 +1027,18 @@ async function handler(
         : status === 400
           ? "invalid_input"
           : "server_error";
+    // Tell the client which fields or rule caused the rejection (never internal details).
+    const detail =
+      error instanceof ApiError
+        ? error.detail
+        : error instanceof z.ZodError
+          ? "fields:" +
+            [...new Set(error.issues.map((i) => String(i.path[0] ?? "value")))]
+              .slice(0, 6)
+              .join(",")
+          : undefined;
     return Response.json(
-      { error: code },
+      { error: code, ...(detail ? { detail } : {}) },
       { status, headers: { "Cache-Control": "no-store" } },
     );
   }

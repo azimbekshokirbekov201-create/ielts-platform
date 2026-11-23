@@ -25,9 +25,13 @@ export function RichEditor({
   value,
   onChange,
   label = "Rich text",
+  required = false,
+  maxLength = 50000,
 }: {
   value: string;
   label?: string;
+  required?: boolean;
+  maxLength?: number;
   onChange: (s: string) => void;
 }) {
   const ref = useRef<HTMLTextAreaElement>(null);
@@ -65,7 +69,8 @@ export function RichEditor({
         className="input live-editor"
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        maxLength={50000}
+        required={required}
+        maxLength={maxLength}
       />
     </div>
   );
