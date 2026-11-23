@@ -15,7 +15,7 @@ import {
   speakingCriteria,
   bandAverage,
 } from "@/server/validation";
-import { matchesFileType } from "@/server/uploads";
+import { matchesFileType, maxUploadBytes, extensionOf } from "@/server/uploads";
 import { evaluateAi } from "@/server/ai";
 import { importHtmlTest } from "@/server/html-import";
 export const runtime = "nodejs";
@@ -245,6 +245,7 @@ async function handler(
       "writing_tasks",
       "speaking_tasks",
       "mock_exams",
+      "html_tests",
     ];
     if (
       path[0] === "catalog" &&
@@ -564,11 +565,14 @@ async function handler(
       const p = z
         .object({
           bucket: z.enum(["speaking", "course-media"]),
-          type: z.string(),
-          size: z.number().int().min(1).max(26214400),
+          type: z.string().max(200),
+          name: z.string().max(255).optional(),
+          size: z.number().int().min(1).max(2097152000),
         })
         .parse(await input(req));
       if (p.bucket === "course-media") teacher();
+      if (p.size > maxUploadBytes(p.bucket))
+        throw new ApiError(413, "too_large");
       const mimes: Record<string, string> = {
         "audio/webm": "webm",
         "audio/ogg": "ogg",
@@ -581,15 +585,17 @@ async function handler(
         "application/pdf": "pdf",
         "video/mp4": "mp4",
       };
+      // Authors may upload any kind of file; students can only send audio recordings.
       if (
-        !mimes[p.type] ||
-        (p.bucket === "speaking" &&
-          !["audio/webm", "audio/ogg", "audio/mp4", "audio/wav"].includes(
-            p.type,
-          ))
+        p.bucket === "speaking" &&
+        !["audio/webm", "audio/ogg", "audio/mp4", "audio/wav"].includes(p.type)
       )
         throw new ApiError(400, "invalid_file");
-      const path = `${user.id}/${crypto.randomUUID()}.${mimes[p.type]}`;
+      const path = `${user.id}/${crypto.randomUUID()}.${
+        p.bucket === "speaking"
+          ? mimes[p.type]
+          : extensionOf(p.name, mimes[p.type])
+      }`;
       const issued = checked(
         await db.storage.from(p.bucket).createSignedUploadUrl(path),
       );
@@ -612,11 +618,12 @@ async function handler(
       const type = file.type.split(";")[0];
       if (
         file.size < 1 ||
-        file.size > 26214400 ||
-        !matchesFileType(
-          type,
-          new Uint8Array(await file.slice(0, 16).arrayBuffer()),
-        )
+        file.size > maxUploadBytes(p.bucket) ||
+        (p.bucket === "speaking" &&
+          !matchesFileType(
+            type,
+            new Uint8Array(await file.slice(0, 16).arrayBuffer()),
+          ))
       )
         throw new ApiError(400, "invalid_file");
       checked(
@@ -641,7 +648,11 @@ async function handler(
         file = form.get("file"),
         bucket = z.enum(["speaking", "course-media"]).parse(form.get("bucket"));
       if (bucket === "course-media") teacher();
-      if (!(file instanceof File) || file.size < 1 || file.size > 26214400)
+      if (
+        !(file instanceof File) ||
+        file.size < 1 ||
+        file.size > maxUploadBytes(bucket)
+      )
         throw new ApiError(400, "invalid_file");
       const mimes: Record<string, string> = {
         "audio/webm": "webm",
@@ -655,21 +666,23 @@ async function handler(
         "application/pdf": "pdf",
         "video/mp4": "mp4",
       };
-      const type = file.type.split(";")[0];
+      const type = file.type.split(";")[0] || "application/octet-stream";
       if (
-        !mimes[type] ||
-        (bucket === "speaking" &&
-          !["audio/webm", "audio/ogg", "audio/mp4", "audio/wav"].includes(type))
-      )
-        throw new ApiError(400, "invalid_file");
-      if (
-        !matchesFileType(
+        bucket === "speaking" &&
+        (!["audio/webm", "audio/ogg", "audio/mp4", "audio/wav"].includes(
           type,
-          new Uint8Array(await file.slice(0, 16).arrayBuffer()),
-        )
+        ) ||
+          !matchesFileType(
+            type,
+            new Uint8Array(await file.slice(0, 16).arrayBuffer()),
+          ))
       )
         throw new ApiError(400, "invalid_file");
-      const path = `${user.id}/${crypto.randomUUID()}.${mimes[type]}`;
+      const path = `${user.id}/${crypto.randomUUID()}.${
+        bucket === "speaking"
+          ? mimes[type]
+          : extensionOf(file.name, mimes[type])
+      }`;
       checked(
         await db.storage
           .from(bucket)
@@ -795,6 +808,7 @@ async function handler(
               "writing_tasks",
               "speaking_tasks",
               "mock_exams",
+              "html_tests",
             ])
               for (const row of await s.all(kind)) {
                 if (row.access_tier === tier) continue;

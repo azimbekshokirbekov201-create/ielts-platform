@@ -9,6 +9,7 @@ import { Practice } from "./practice";
 import { Writing } from "./writing";
 import { Speaking } from "./speaking";
 import { MockExam } from "./mock-exam";
+import { HtmlTests } from "./html-tests";
 import { ProgressPage } from "./progress";
 import { Settings } from "./settings";
 import { RoleWorkspace } from "./workspace";
@@ -42,6 +43,8 @@ export function Platform({ route }: { route: string }) {
             <Writing />
           ) : route === "/practice/speaking" ? (
             <Speaking />
+          ) : route === "/practice/html" ? (
+            <HtmlTests />
           ) : route === "/mock-exams" ? (
             <MockExam />
           ) : route === "/progress" ? (

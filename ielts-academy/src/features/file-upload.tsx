@@ -38,7 +38,6 @@ export function FileUpload({
         ref={input}
         type="file"
         aria-label="Choose attachment"
-        accept=".pdf,.jpg,.jpeg,.png,.webp,.mp3,.wav,.m4a,.mp4"
         onChange={(e) => upload(e.target.files?.[0])}
       />
       <button

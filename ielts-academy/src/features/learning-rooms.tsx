@@ -61,7 +61,9 @@ export function Catalog({
                   <Badge color={item?.color || "blue"}>
                     {row.variant
                       ? t(String(row.variant))
-                      : item?.title || "Mock exam"}
+                      : kind === "html_tests"
+                        ? "HTML"
+                        : item?.title || "Mock exam"}
                   </Badge>
                   <h2>{row.title}</h2>
                   <p>A focused step toward your next chapter.</p>

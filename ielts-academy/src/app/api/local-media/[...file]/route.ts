@@ -1,6 +1,10 @@
 import { cookies } from "next/headers";
 import { userDb, sessionUser } from "@/server/local/client";
-import { matchesFileType } from "@/server/uploads";
+import {
+  deliveryHeaders,
+  matchesFileType,
+  maxUploadBytes,
+} from "@/server/uploads";
 export const runtime = "nodejs";
 async function handler(
   req: Request,
@@ -19,9 +23,11 @@ async function handler(
       if (r.error || !r.data) return new Response(null, { status: 403 });
       return new Response(r.data, {
         headers: {
-          "Content-Type": r.data.type,
           "Cache-Control": "private, no-store",
           "X-Content-Type-Options": "nosniff",
+          ...(bucket === "speaking"
+            ? { "Content-Type": r.data.type }
+            : deliveryHeaders(path)),
         },
       });
     }
@@ -38,17 +44,20 @@ async function handler(
       const { value, done } = await reader.read();
       if (done) break;
       size += value.length;
-      if (size > 26214400) {
+      if (size > maxUploadBytes(bucket)) {
         await reader.cancel();
         return new Response(null, { status: 413 });
       }
       chunks.push(value);
     }
     const bytes = Buffer.concat(chunks);
-    const type = (req.headers.get("content-type") || "").split(";")[0];
+    const type =
+      (req.headers.get("content-type") || "").split(";")[0] ||
+      "application/octet-stream";
+    // Student recordings are verified byte by byte; author uploads can be any file.
     if (
-      !matchesFileType(type, bytes) ||
-      (bucket === "speaking" && !type.startsWith("audio/"))
+      bucket === "speaking" &&
+      (!matchesFileType(type, bytes) || !type.startsWith("audio/"))
     )
       return new Response(null, { status: 400 });
     const r = await db.storage

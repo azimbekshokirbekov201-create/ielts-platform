@@ -9,6 +9,7 @@ import {
   PenLine,
   Mic,
   ClipboardList,
+  FileCode,
   GraduationCap,
   ChartNoAxesCombined,
   Settings,
@@ -50,6 +51,7 @@ const navigation = [
   { key: "writing", path: "/practice/writing", icon: PenLine },
   { key: "speaking", path: "/practice/speaking", icon: Mic },
   { key: "mock", path: "/mock-exams", icon: ClipboardList },
+  { key: "html", path: "/practice/html", icon: FileCode },
   { key: "courses", path: "/courses", icon: GraduationCap },
   { key: "progress", path: "/progress", icon: ChartNoAxesCombined },
 ] as const;
@@ -144,7 +146,7 @@ export function Shell({
           {navigation.map((n, i) => (
             <div key={n.key}>
               {i === 1 && <p className="nav-label">PRACTICE & LEARN</p>}
-              {i === 6 && <div className="nav-divider" />}
+              {i === 7 && <div className="nav-divider" />}
               <Link
                 onClick={() => setMobile(false)}
                 className={`nav-link ${route === n.path ? "active" : ""}`}

@@ -18,6 +18,17 @@ const base = {
   status: status.default("draft"),
 };
 export const contentSchemas = {
+  // A self-contained HTML exam page (any layout) shown to students in a sandboxed frame.
+  html_tests: z.object({
+    ...base,
+    description: text.default(""),
+    html_path: z
+      .string()
+      .regex(
+        /^[-a-zA-Z0-9]+\/[-a-zA-Z0-9][-.a-zA-Z0-9]*$/,
+        "Uploaded file required",
+      ),
+  }),
   courses: z.object({ ...base, description: text.default("") }),
   course_modules: z.object({
     course_id: uuid,

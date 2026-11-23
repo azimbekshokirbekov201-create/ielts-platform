@@ -956,7 +956,7 @@ describe("SQLite API integration (real migrations, passwords and sessions)", () 
       ),
     ).toBe(true);
   });
-  it("authorizes teacher media uploads and rejects disguised files and student content uploads", async () => {
+  it("authorizes teacher media uploads and rejects student content uploads", async () => {
     const media = await import("@/app/api/local-media/[...file]/route");
     as(teacher);
     const issued = await api("media-upload", "POST", {
@@ -981,9 +981,6 @@ describe("SQLite API integration (real migrations, passwords and sessions)", () 
         }),
         params,
       );
-    expect(
-      (await request(Buffer.from("<script>bad file</script>"))).status,
-    ).toBe(400);
     const wave = Buffer.alloc(44);
     wave.write("RIFF");
     wave.write("WAVE", 8);
@@ -1575,5 +1572,255 @@ describe("Deleting content", () => {
     expect(
       (await api("admin/content/courses/" + course.id, "DELETE")).status,
     ).toBe(200);
+  });
+});
+
+async function authorUpload(name: string, type: string, bytes: Buffer) {
+  const media = await import("@/app/api/local-media/[...file]/route");
+  const issued = await api("media-upload", "POST", {
+    bucket: "course-media",
+    type,
+    name,
+    size: bytes.length,
+  });
+  expect(issued.status).toBe(200);
+  const path = issued.data.path as string;
+  const params = {
+    params: Promise.resolve({ file: ["course-media", ...path.split("/")] }),
+  };
+  const put = await media.PUT(
+    new Request("http://localhost:3000" + issued.data.signedUrl, {
+      method: "PUT",
+      headers: { origin: "http://localhost:3000", "content-type": type },
+      body: new Uint8Array(bytes),
+    }),
+    params,
+  );
+  expect(put.status).toBe(200);
+  expect(
+    (
+      await api("media-finalize", "POST", {
+        bucket: "course-media",
+        path,
+        name,
+      })
+    ).status,
+  ).toBe(200);
+  return {
+    path,
+    get: () =>
+      media.GET(
+        new Request("http://localhost:3000" + issued.data.signedUrl),
+        params,
+      ),
+  };
+}
+describe("Any file type for authors, pages in a sandbox, HTML tests", () => {
+  it("accepts any file type from authors and delivers it safely", async () => {
+    as(teacher);
+    const page = await authorUpload(
+      "Exam 1.html",
+      "",
+      Buffer.from("<html><script>alert(1)</script></html>"),
+    );
+    expect(page.path).toMatch(/\.html$/);
+    const html = await page.get();
+    expect(html.status).toBe(200);
+    expect(html.headers.get("content-type")).toMatch(/^text\/html/);
+    expect(html.headers.get("content-security-policy")).toMatch(
+      /^sandbox allow-scripts/,
+    );
+    expect(html.headers.get("content-security-policy")).not.toMatch(
+      /allow-same-origin/,
+    );
+    expect(html.headers.get("x-content-type-options")).toBe("nosniff");
+    // the claimed type is ignored: an "image" that is really a program is only ever a download
+    const exe = await authorUpload(
+      "setup.exe",
+      "image/png",
+      Buffer.from("MZ not an image"),
+    );
+    const download = await exe.get();
+    expect(download.headers.get("content-type")).toBe(
+      "application/octet-stream",
+    );
+    expect(download.headers.get("content-disposition")).toBe("attachment");
+    const zip = await authorUpload(
+      "pack.zip",
+      "application/zip",
+      Buffer.from("PK\u0003\u0004data"),
+    );
+    expect((await zip.get()).headers.get("content-disposition")).toBe(
+      "attachment",
+    );
+    const noExt = await authorUpload("README", "", Buffer.from("hello"));
+    expect(noExt.path).toMatch(/\.bin$/);
+    // a pdf keeps being shown inline
+    const pdf = await authorUpload(
+      "a.pdf",
+      "application/pdf",
+      Buffer.from("%PDF-1.4 x"),
+    );
+    expect((await pdf.get()).headers.get("content-type")).toBe(
+      "application/pdf",
+    );
+  });
+  it("enforces the configurable size limit and keeps student recordings audio-only", async () => {
+    as(teacher);
+    const before = process.env.MAX_UPLOAD_MB;
+    process.env.MAX_UPLOAD_MB = "1";
+    try {
+      const big = await api("media-upload", "POST", {
+        bucket: "course-media",
+        type: "",
+        name: "big.html",
+        size: 2 * 1048576,
+      });
+      expect(big.status).toBe(413);
+      expect(big.error).toBe("too_large");
+    } finally {
+      if (before === undefined) delete process.env.MAX_UPLOAD_MB;
+      else process.env.MAX_UPLOAD_MB = before;
+    }
+    expect(
+      (
+        await api("media-upload", "POST", {
+          bucket: "course-media",
+          type: "",
+          name: "big.html",
+          size: 90 * 1048576,
+        })
+      ).status,
+    ).toBe(200);
+    expect(
+      (
+        await api("media-upload", "POST", {
+          bucket: "course-media",
+          type: "",
+          name: "huge.html",
+          size: 150 * 1048576,
+        })
+      ).status,
+    ).toBe(413);
+    await newUser("recorder");
+    expect(
+      (
+        await api("media-upload", "POST", {
+          bucket: "speaking",
+          type: "text/html",
+          name: "x.html",
+          size: 100,
+        })
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await api("media-upload", "POST", {
+          bucket: "course-media",
+          type: "",
+          name: "x.html",
+          size: 100,
+        })
+      ).status,
+    ).toBe(403);
+  });
+  it("hosts an HTML test as-is, gated by premium access and subscription scope", async () => {
+    as(teacher);
+    const file = await authorUpload(
+      "My Test.html",
+      "text/html",
+      Buffer.from("<html><body>exam</body></html>"),
+    );
+    const created = await api("admin/content/html_tests", "POST", {
+      title: "CDI Reading 12",
+      html_path: file.path,
+      status: "published",
+      access_tier: "premium",
+    });
+    expect(created.status).toBe(200);
+    // authors cannot point a test at somebody else's file
+    const stolen = await api("admin/content/html_tests", "POST", {
+      title: "Stolen",
+      html_path: admin + "/" + randomUUID() + ".html",
+    });
+    expect(stolen.status).toBe(403);
+    expect(
+      (
+        await api("admin/content/html_tests", "POST", {
+          title: "No file",
+          html_path: "",
+        })
+      ).detail,
+    ).toBe("fields:html_path");
+    const user = await newUser("html-student");
+    const listed = (await api("catalog/html_tests")).data as {
+      id: string;
+      locked?: boolean;
+    }[];
+    expect(listed.find((x) => x.id === created.data.id)?.locked).toBe(true);
+    expect(
+      (
+        await api("media-url", "POST", {
+          bucket: "course-media",
+          path: file.path,
+        })
+      ).status,
+    ).toBe(403);
+    // a code that only unlocks Reading does not open HTML tests; one for "html" does
+    as(admin);
+    const reading = (
+      await api("admin/subscriptions/codes", "POST", {
+        days: 2,
+        limit: 1,
+        scope: ["reading"],
+      })
+    ).data;
+    const html = (
+      await api("admin/subscriptions/codes", "POST", {
+        days: 2,
+        limit: 1,
+        scope: ["html"],
+      })
+    ).data;
+    as(user);
+    expect(
+      (await api("subscription/redeem", "POST", { code: reading.code })).status,
+    ).toBe(200);
+    expect(
+      (
+        await api("media-url", "POST", {
+          bucket: "course-media",
+          path: file.path,
+        })
+      ).status,
+    ).toBe(403);
+    expect(
+      (await api("subscription/redeem", "POST", { code: html.code })).status,
+    ).toBe(200);
+    const open = (await api("catalog/html_tests")).data as {
+      id: string;
+      html_path?: string;
+      locked?: boolean;
+    }[];
+    const row = open.find((x) => x.id === created.data.id)!;
+    expect(row.locked).toBeUndefined();
+    expect(row.html_path).toBe(file.path);
+    const link = await api("media-url", "POST", {
+      bucket: "course-media",
+      path: file.path,
+    });
+    expect(link.status).toBe(200);
+    expect(link.data.signedUrl).toContain("/api/local-media/course-media/");
+    // drafts are never listed for students
+    as(teacher);
+    await api("admin/content/html_tests/" + created.data.id, "PATCH", {
+      status: "draft",
+    });
+    as(user);
+    expect(
+      ((await api("catalog/html_tests")).data as { id: string }[]).some(
+        (x) => x.id === created.data.id,
+      ),
+    ).toBe(false);
   });
 });

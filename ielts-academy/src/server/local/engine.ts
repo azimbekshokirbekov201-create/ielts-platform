@@ -86,6 +86,7 @@ export class Store {
     if (kind === "writing_tasks") return "writing";
     if (kind === "speaking_tasks") return "speaking";
     if (kind === "mock_exams") return "mock";
+    if (kind === "html_tests") return "html";
     if (kind === "courses" || kind === "lessons") return "courses";
     return null;
   }
@@ -164,6 +165,7 @@ export class Store {
         "writing_tasks",
         "speaking_tasks",
         "mock_exams",
+        "html_tests",
       ].includes(kind)
     )
       return r.status === "published" && (await this.allowed(kind, r));
@@ -279,6 +281,7 @@ export class Store {
           "storage_path",
           "attachment_path",
           "media_path",
+          "html_path",
         ]) {
           const path = row[field];
           if (

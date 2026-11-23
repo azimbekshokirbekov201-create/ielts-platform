@@ -253,6 +253,7 @@ export async function mediaAllowed(store: Store, bucket: string, path: string) {
     ["lesson_resources", "storage_path"],
     ["test_sections", "audio_path"],
     ["writing_tasks", "image_path"],
+    ["html_tests", "html_path"],
   ])
     for (const r of await store.all(kind))
       if (r[field] === path && (await store.visible(kind, r))) return true;

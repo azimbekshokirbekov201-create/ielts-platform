@@ -19,6 +19,7 @@ export default async function Page({
       "/practice/reading",
       "/practice/writing",
       "/practice/speaking",
+      "/practice/html",
       "/mock-exams",
       "/courses",
       "/progress",

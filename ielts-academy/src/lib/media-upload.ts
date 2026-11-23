@@ -4,7 +4,7 @@ export async function uploadMedia(
   bucket: "speaking" | "course-media",
   progress?: (value: number) => void,
 ) {
-  const raw = file.type.split(";")[0];
+  const raw = file.type.split(";")[0] || "application/octet-stream";
   const type =
     (
       { "audio/x-m4a": "audio/mp4", "audio/x-wav": "audio/wav" } as Record<
@@ -15,7 +15,12 @@ export async function uploadMedia(
   const issued = await api<{ signedUrl: string; path: string }>(
     "media-upload",
     "POST",
-    { bucket, type, size: file.size },
+    {
+      bucket,
+      type,
+      size: file.size,
+      name: file instanceof File ? file.name : undefined,
+    },
   );
   if (progress)
     await new Promise<void>((resolve, reject) => {

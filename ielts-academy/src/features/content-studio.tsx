@@ -17,7 +17,18 @@ import {
   PageControls,
 } from "./academy-context";
 import { PrivateMedia } from "./academy";
+// Fields that hold an uploaded file (any file type) or, for video, a YouTube link.
+const uploadKeys = [
+  "audio_path",
+  "image_path",
+  "attachment_path",
+  "media_path",
+  "storage_path",
+  "video_url",
+  "html_path",
+];
 const templates: Record<string, Record<string, unknown>> = {
+  html_tests: { title: "", description: "", html_path: "", status: "draft" },
   courses: { title: "", description: "", status: "draft" },
   course_modules: { course_id: "", title: "", position: 0 },
   lessons: {
@@ -126,6 +137,7 @@ for (const key of [
   "writing_tasks",
   "speaking_tasks",
   "mock_exams",
+  "html_tests",
 ])
   templates[key].access_tier = "premium";
 enums.access_tier = ["free", "premium"];
@@ -515,14 +527,7 @@ function ContentEditor() {
             // Rich editors and uploads hold buttons: a <label> would forward label clicks to the first one.
             const Wrap =
               ["prompt", "body", "description"].includes(key) ||
-              [
-                "audio_path",
-                "image_path",
-                "attachment_path",
-                "media_path",
-                "storage_path",
-                "video_url",
-              ].includes(key)
+              uploadKeys.includes(key)
                 ? "div"
                 : "label";
             return (
@@ -539,21 +544,17 @@ function ContentEditor() {
                     maxLength={table === "questions" ? 2000 : 50000}
                     onChange={(v) => change(key, v)}
                   />
-                ) : [
-                    "audio_path",
-                    "image_path",
-                    "attachment_path",
-                    "media_path",
-                    "storage_path",
-                    "video_url",
-                  ].includes(key) ? (
+                ) : uploadKeys.includes(key) ? (
                   <>
                     <input
                       className="input"
+                      required={key === "html_path"}
                       placeholder={
                         key === "video_url"
                           ? "YouTube link or uploaded video"
-                          : "Optional existing URL/path"
+                          : key === "html_path"
+                            ? t("html_path_hint")
+                            : "Optional existing URL/path"
                       }
                       value={String(value || "")}
                       onChange={(e) => change(key, e.target.value || null)}
@@ -737,6 +738,26 @@ function ContentEditor() {
                       >
                         {t("preview")}
                       </button>
+                      {table === "html_tests" && !!row.html_path && (
+                        <button
+                          className="button outline"
+                          onClick={() =>
+                            void run(async () => {
+                              const link = await api<{ signedUrl: string }>(
+                                "media-url",
+                                "POST",
+                                {
+                                  bucket: "course-media",
+                                  path: row.html_path,
+                                },
+                              );
+                              window.open(link.signedUrl, "_blank", "noopener");
+                            })
+                          }
+                        >
+                          {t("html_open")}
+                        </button>
+                      )}
                       {!!row.status && (
                         <button
                           className="button outline"

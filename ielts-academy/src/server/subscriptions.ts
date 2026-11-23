@@ -11,6 +11,7 @@ export const scopeCategories = [
   "speaking",
   "courses",
   "mock",
+  "html",
 ] as const;
 const scopeSchema = z
   .array(z.enum(scopeCategories))

@@ -221,9 +221,9 @@ const messages = {
     "ИИ отключён, нет согласия или достигнут дневной лимит.",
   ],
   invalid_file: [
-    "Unsupported file type or file larger than 25 MB.",
-    "Fayl turi qo‘llanmaydi yoki hajmi 25 MB dan katta.",
-    "Неподдерживаемый формат или размер больше 25 МБ.",
+    "The file was rejected: it is not allowed for this field or it is too large.",
+    "Fayl qabul qilinmadi: bu maydon uchun mos emas yoki hajmi katta.",
+    "Файл отклонён: не подходит для этого поля или слишком большой.",
   ],
   motivation: [
     "Why are you preparing for IELTS?",
@@ -829,6 +829,19 @@ const messages = {
     "Avtomatik saqlash uchun majburiy maydonlarni to‘ldiring.",
     "Заполните обязательные поля для автосохранения.",
   ],
+  html_tests: ["HTML tests", "HTML testlar", "HTML-тесты"],
+  html_tests_hint: [
+    "Interactive exam pages. Your answers are handled inside the test page itself.",
+    "Interaktiv imtihon sahifalari. Javoblaringiz test sahifasining o‘zida ishlanadi.",
+    "Интерактивные экзаменационные страницы. Ответы обрабатываются внутри самой страницы.",
+  ],
+  html_path: ["HTML file", "HTML fayl", "HTML-файл"],
+  html_path_hint: [
+    "Upload the HTML test file below",
+    "HTML test faylini pastdan yuklang",
+    "Загрузите HTML-файл теста ниже",
+  ],
+  html_open: ["Open page", "Sahifani ochish", "Открыть страницу"],
 } satisfies Record<string, readonly string[]>;
 export type MessageKey = keyof typeof messages;
 export function translate(lang: Language, key: string): string {

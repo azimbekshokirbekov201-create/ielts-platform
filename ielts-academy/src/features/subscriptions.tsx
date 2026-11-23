@@ -17,6 +17,7 @@ const categories = [
   ["speaking", "speaking"],
   ["courses", "courses"],
   ["mock", "mock_exams"],
+  ["html", "html_tests"],
 ] as const;
 
 function useScopeText() {
