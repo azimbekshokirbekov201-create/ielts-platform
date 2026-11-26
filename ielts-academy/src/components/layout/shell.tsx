@@ -44,6 +44,14 @@ export function Brand({ small = false }: { small?: boolean }) {
     </Link>
   );
 }
+const mobileNavigation = [
+  { key: "dashboard", path: "/dashboard", icon: LayoutDashboard },
+  { key: "listening", path: "/practice/listening", icon: Headphones },
+  { key: "mock", path: "/mock-exams", icon: ClipboardList },
+  { key: "courses", path: "/courses", icon: GraduationCap },
+  { key: "progress", path: "/progress", icon: ChartNoAxesCombined },
+  { key: "settings", path: "/settings", icon: Settings },
+] as const;
 const navigation = [
   { key: "dashboard", path: "/dashboard", icon: LayoutDashboard },
   { key: "listening", path: "/practice/listening", icon: Headphones },
@@ -306,6 +314,36 @@ export function Shell({
           <Link href="/settings">Preferences</Link>
         </footer>
       </div>
+      <nav className="bottom-nav" aria-label="Quick navigation">
+        {mobileNavigation.map((item) => {
+          const active =
+            route === item.path ||
+            (item.key === "listening" && route.startsWith("/practice/"));
+          return (
+            <Link
+              key={item.key}
+              href={item.path}
+              className={`bottom-nav-link ${active ? "active" : ""}`}
+              aria-current={active ? "page" : undefined}
+            >
+              <item.icon size={21} strokeWidth={active ? 2.4 : 1.8} />
+              <span>{item.key === "settings" ? t.settings : t[item.key]}</span>
+            </Link>
+          );
+        })}
+        {me?.roles.some((role) => ["TEACHER", "ADMIN"].includes(role)) && (
+          <Link href="/teacher" className="bottom-nav-link">
+            <GraduationCap size={21} />
+            <span>{t.teacher}</span>
+          </Link>
+        )}
+        {me?.roles.includes("ADMIN") && (
+          <Link href="/admin" className={`bottom-nav-link ${route === "/admin" ? "active" : ""}`}>
+            <Command size={21} />
+            <span>{t.admin}</span>
+          </Link>
+        )}
+      </nav>
       <Modal
         open={search}
         onOpenChange={setSearch}
