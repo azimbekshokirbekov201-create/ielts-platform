@@ -331,6 +331,18 @@ export function Shell({
             </Link>
           );
         })}
+        {me?.roles.some((role) => ["TEACHER", "ADMIN"].includes(role)) && (
+          <Link href="/teacher" className="bottom-nav-link">
+            <GraduationCap size={21} />
+            <span>{t.teacher}</span>
+          </Link>
+        )}
+        {me?.roles.includes("ADMIN") && (
+          <Link href="/admin" className={`bottom-nav-link ${route === "/admin" ? "active" : ""}`}>
+            <Command size={21} />
+            <span>{t.admin}</span>
+          </Link>
+        )}
       </nav>
       <Modal
         open={search}
